@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    { "id": "t1", "title": "Set rupee prices", "dept": "Finance", "owner": "CFO", "priority": "High", "status": "To be given", "due": "2026-11-28", "givenBy": "CEO", "links": [{ "label": "Dashboard", "url": "https://lux-dashord.vercel.app/trips" }, { "label": "Bad", "url": "javascript:alert(1)" }], "notes": "Full and token amount.", "createdAt": "2026-11-20T10:00:00.000Z", "updatedAt": "2026-11-22T09:30:00.000Z", "extra": "dropped" },
+    { "id": "t2", "title": "Publish trips on the website", "dept": "Trips & Content", "owner": "Ops intern", "priority": "High", "status": "Not done", "due": "2026-11-30", "links": [] },
+    { "id": "t3", "title": "Remove the test story", "dept": "Nowhere", "owner": "Nobody Known", "priority": "Medium", "status": "Done", "due": "2026-13-45", "links": [] }
+  ],
+  "bookings": [
+    { "id": "b1", "ref": "LUX-001", "guest": "Asha Rao", "trip": "Vietnam", "start": "2026-12-22", "end": "2027-01-01", "pax": 2, "value": 133998, "received": 50000, "payStatus": "Part paid", "tripStatus": "Documents pending", "owner": "Ops intern", "links": [] },
+    { "id": "b2", "guest": "Ben Joseph", "trip": "Japan", "value": "not a number", "payStatus": "Fully paid", "owner": "CFO" }
+  ],
+  "team": [{ "id": "p1", "name": "CFO", "role": "Chief Financial Officer", "dept": "Finance", "kind": "Full-time", "status": "Active" }],
+  "finance": [
+    { "id": "f1", "entry": "Hotel advance", "flow": "Out", "category": "Supplier payment", "amount": 25000, "date": "2026-11-20", "status": "Paid", "owner": "CFO" }
+  ],
+  "access": [
+    { "id": "a1", "system": "Admin dashboard", "holder": "CTO", "status": "Given", "owner": "" }
+  ],
+  "activity": [{ "at": "2026-11-20T10:00:00.000Z", "user": "CEO", "action": "created", "collection": "tasks", "id": "t1", "title": "x" }]
+}

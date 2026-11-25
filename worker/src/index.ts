@@ -4,6 +4,7 @@ import { csrf, mustChangeGuard, readSession, requireUser } from "./lib/session";
 import { auth } from "./routes/auth";
 import { auditRoutes } from "./routes/audit";
 import { dashboard } from "./routes/dashboard";
+import { importRoutes } from "./routes/import";
 import { leave } from "./routes/leave";
 import { notifications } from "./routes/notifications";
 import { onboarding } from "./routes/onboarding";
@@ -34,6 +35,7 @@ app.route("/api/notifications", notifications);
 app.route("/api/dashboard", dashboard);
 app.route("/api/search", search);
 app.route("/api/audit", auditRoutes);
+app.route("/api/import", importRoutes);
 app.get("/api/me", requireUser, (c) => c.json({ user: c.var.user }));
 
 app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));

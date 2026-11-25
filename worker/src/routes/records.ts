@@ -2,99 +2,15 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import { DEPT_NAMES, REGISTERS, registerDepts } from "../../../shared/schema";
-import type { FieldDef, RegisterDef } from "../../../shared/schema";
+import type { RegisterDef } from "../../../shared/schema";
 import type { AppEnv } from "../env";
 import { auditStmt } from "../lib/audit";
 import { canDeleteRecord, canReadRegister, canWriteRegister } from "../lib/policy";
 import { requireUser } from "../lib/session";
-import { httpUrl } from "../lib/validate";
+import { Invalid, applyData, isEmpty, titleOf } from "../lib/recordFields";
+import type { Data } from "../lib/recordFields";
 
-type Data = Record<string, unknown>;
 type Ctx = Context<AppEnv>;
-
-class Invalid extends Error {
-  constructor(public field?: string) {
-    super("invalid");
-  }
-}
-
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_TEXT = 5000;
-
-const isEmpty = (v: unknown) => v === null || v === undefined || v === "";
-const isDate = (s: string) => {
-  if (!DATE.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-};
-
-/** Validates one non-empty value for a field; returns the value to store. Throws Invalid(key). */
-function cleanValue(reg: RegisterDef, f: FieldDef, v: unknown): unknown {
-  const bad = () => new Invalid(f.key);
-  switch (f.type) {
-    case "text":
-    case "textarea":
-    case "email": {
-      if (typeof v !== "string") throw bad();
-      const s = v.trim();
-      if (s.length > MAX_TEXT) throw bad();
-      if (s === "") return undefined;
-      if (f.type === "email" && !EMAIL.test(s)) throw bad();
-      return s;
-    }
-    case "select":
-      if (typeof v !== "string" || !(f.options ?? []).includes(v)) throw bad();
-      return v;
-    case "status":
-      if (typeof v !== "string" || !reg.statuses.some((s) => s.v === v)) throw bad();
-      return v;
-    case "money":
-    case "number":
-      if (typeof v !== "number" || !Number.isFinite(v) || v < 0) throw bad();
-      return v;
-    case "date":
-      if (typeof v !== "string" || !isDate(v)) throw bad();
-      return v;
-    case "checklist": {
-      if (!Array.isArray(v) || v.length > 100) throw bad();
-      const opts = f.options ?? [];
-      const seen = new Set<string>();
-      for (const x of v) {
-        if (typeof x !== "string" || !opts.includes(x) || seen.has(x)) throw bad();
-        seen.add(x);
-      }
-      return v;
-    }
-    case "links": {
-      if (!Array.isArray(v) || v.length > 20) throw bad();
-      return v.map((x) => {
-        if (!x || typeof x !== "object") throw bad();
-        const { label, url } = x as Record<string, unknown>;
-        if (typeof label !== "string" || label.length > 300) throw bad();
-        if (typeof url !== "string" || url.length > 2000 || !httpUrl(url.trim())) throw bad();
-        return { label: label.trim(), url: url.trim() };
-      });
-    }
-    default:
-      throw bad();
-  }
-}
-
-const STORED = (f: FieldDef) => f.type !== "computed" && f.type !== "person";
-
-/** Applies `input` over `base` (field by field). Unknown keys, computed and person fields are ignored. */
-function applyData(reg: RegisterDef, base: Data, input: Data): Data {
-  const out: Data = { ...base };
-  for (const f of reg.fields.filter(STORED)) {
-    if (!(f.key in input)) continue;
-    const v = input[f.key];
-    const clean = isEmpty(v) ? undefined : cleanValue(reg, f, v);
-    if (clean === undefined) delete out[f.key];
-    else out[f.key] = clean;
-  }
-  return out;
-}
 
 interface RecordRow {
   id: string;
@@ -137,11 +53,6 @@ const toApi = (r: RecordRow) => ({
 
 const load = (db: D1Database, collection: string, id: string) =>
   db.prepare(`${SELECT} WHERE r.collection = ? AND r.id = ?`).bind(collection, id).first<RecordRow>();
-
-const titleOf = (reg: RegisterDef, data: Data) => {
-  const t = data[reg.titleKey];
-  return typeof t === "string" ? t : "";
-};
 
 const DeptSchema = z.string().refine((d) => DEPT_NAMES.includes(d));
 const Owner = z.string().min(1).max(100);
