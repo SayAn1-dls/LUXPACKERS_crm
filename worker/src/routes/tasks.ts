@@ -9,17 +9,11 @@ import { notifyStmts } from "../lib/notify";
 import { canApproveTask, canAssignTo, canEditTaskStatus, canSeeTask } from "../lib/policy";
 import type { AssigneeRef, TaskRef } from "../lib/policy";
 import { requireUser } from "../lib/session";
+import { httpUrl } from "../lib/validate";
 
 const Dept = z.string().refine((d) => DEPT_NAMES.includes(d), "unknown department");
 const Date10 = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Text = (n: number) => z.string().trim().max(n);
-const httpUrl = (x: string) => {
-  try {
-    return ["http:", "https:"].includes(new URL(x).protocol);
-  } catch {
-    return false;
-  }
-};
 const Links = z.array(z.string().trim().min(1).max(2000).refine(httpUrl, "http(s) links only")).max(20);
 
 const invalid = (e: z.ZodError) =>
