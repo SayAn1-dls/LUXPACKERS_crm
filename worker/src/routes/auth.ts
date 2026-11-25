@@ -16,8 +16,7 @@ const MAX_FAILED = 5;
 const WINDOW_MS = 15 * 60_000;
 
 // A real PBKDF2 hash of a throwaway value, so unknown emails cost the same time as wrong passwords.
-const DUMMY_SALT = "AAAAAAAAAAAAAAAAAAAAAA==";
-const DUMMY_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const DUMMY_HASH = "pbkdf2-sha256$100000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 const LoginBody = z.object({
   email: z.string().trim().toLowerCase().min(1).max(320),
@@ -70,11 +69,15 @@ auth.post("/login", async (c) => {
 
   const row = await db.prepare("SELECT * FROM users WHERE email = ?").bind(email).first<UserRow>();
   const ok = row
-    ? await verifyPassword(password, row.password_hash, row.password_salt)
-    : (await verifyPassword(password, DUMMY_HASH, DUMMY_SALT), false);
+    ? await verifyPassword(password, row.password_hash)
+    : (await verifyPassword(password, DUMMY_HASH), false);
 
   if (!row || !ok || row.status === "left") {
-    await db.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind(email, new Date().toISOString()).run();
+    // Record the failure and drop this email's attempts that fell out of the window, in one batch.
+    await db.batch([
+      db.prepare("DELETE FROM login_attempts WHERE email = ? AND at <= ?").bind(email, since),
+      db.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind(email, new Date().toISOString()),
+    ]);
     return c.json({ error: "bad_credentials" }, 401);
   }
 
@@ -99,9 +102,10 @@ auth.post("/password", requireUser, async (c) => {
   const parsed = PasswordBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "invalid" }, 400);
   const { current, next } = parsed.data;
+  if (next === current) return c.json({ error: "same_password" }, 400);
   const db = c.env.DB;
-  const row = await db.prepare("SELECT password_hash, password_salt FROM users WHERE id = ?").bind(user.id).first<UserRow>();
-  if (!row || !(await verifyPassword(current, row.password_hash, row.password_salt))) {
+  const row = await db.prepare("SELECT password_hash FROM users WHERE id = ?").bind(user.id).first<UserRow>();
+  if (!row || !(await verifyPassword(current, row.password_hash))) {
     return c.json({ error: "wrong_current_password" }, 400);
   }
   const { hash, salt } = await hashPassword(next);

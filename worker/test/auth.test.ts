@@ -17,10 +17,46 @@ describe("passwords", () => {
   it("hash/verify round-trip; wrong password false; two hashes of same pw differ", async () => {
     const a = await hashPassword("a-long-password");
     const b = await hashPassword("a-long-password");
-    expect(await verifyPassword("a-long-password", a.hash, a.salt)).toBe(true);
-    expect(await verifyPassword("wrong-password!", a.hash, a.salt)).toBe(false);
+    expect(await verifyPassword("a-long-password", a.hash)).toBe(true);
+    expect(await verifyPassword("wrong-password!", a.hash)).toBe(false);
     expect(a.hash).not.toBe(b.hash);
     expect(a.salt).not.toBe(b.salt);
+  });
+
+  it("stores a versioned string and verifies using the iteration count recorded in it", async () => {
+    const a = await hashPassword("a-long-password");
+    expect(a.hash).toMatch(/^pbkdf2-sha256\$100000\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
+    // A hash written with a lower count still verifies: the count comes from the string, not the code.
+    const [scheme, , salt, hash] = a.hash.split("$");
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("another-password"), "PBKDF2", false, ["deriveBits"]);
+    const saltBytes = Uint8Array.from(atob(salt), (ch) => ch.charCodeAt(0));
+    const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: saltBytes, iterations: 5000 }, key, 256));
+    const low = `${scheme}$5000$${salt}$${btoa(String.fromCharCode(...bits))}`;
+    expect(await verifyPassword("another-password", low)).toBe(true);
+    expect(hash).not.toBe("");
+  });
+
+  it("a tampered iteration count fails", async () => {
+    const a = await hashPassword("a-long-password");
+    const [scheme, , salt, hash] = a.hash.split("$");
+    expect(await verifyPassword("a-long-password", `${scheme}$99999$${salt}$${hash}`)).toBe(false);
+    expect(await verifyPassword("a-long-password", `${scheme}$1$${salt}$${hash}`)).toBe(false);
+  });
+
+  it("malformed stored values fail safely instead of throwing", async () => {
+    for (const bad of [
+      "",
+      "garbage",
+      "pbkdf2-sha256$100000$onlythree",
+      "pbkdf2-sha256$abc$AAAA$AAAA",
+      "pbkdf2-sha256$0$AAAA$AAAA",
+      "pbkdf2-sha256$100000$!!!$AAAA",
+      "pbkdf2-sha256$100000$AAAA$",
+      "md5$100000$AAAA$AAAA",
+      "pbkdf2-sha256$100000$AAAA$AAAA$extra",
+    ]) {
+      expect(await verifyPassword("a-long-password", bad)).toBe(false);
+    }
   });
 });
 
@@ -93,6 +129,24 @@ describe("login", () => {
     expect(await r.json()).toEqual({ error: "locked" });
   });
 
+  it("a failed sign-in prunes that email's attempts older than 15 minutes, and only that email's", async () => {
+    const u = await makeUser("employee", "Sales");
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+    const fresh = new Date(Date.now() - 5 * 60_000).toISOString();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind(u.email, old),
+      env.DB.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind(u.email, fresh),
+      env.DB.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind("other@example.com", old),
+    ]);
+    const r = await api(null, "POST", "/api/auth/login", { email: u.email, password: "nope-nope-nope" });
+    expect(r.status).toBe(401);
+    const mine = await env.DB.prepare("SELECT at FROM login_attempts WHERE email = ?").bind(u.email).all();
+    expect(mine.results.length).toBe(2); // the fresh one plus the new failure
+    expect(mine.results.some((x: any) => x.at === old)).toBe(false);
+    const other = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE email = ?").bind("other@example.com").first<{ n: number }>();
+    expect(other?.n).toBe(1);
+  });
+
   it("users who have left cannot sign in", async () => {
     const u = await makeUser("employee", "Sales", { status: "left" });
     const r = await api(null, "POST", "/api/auth/login", { email: u.email, password: u.password });
@@ -141,6 +195,9 @@ describe("must change password", () => {
     expect(bad.status).toBe(400);
     const short = await api(u.cookie, "POST", "/api/auth/password", { current: u.password, next: "short" });
     expect(short.status).toBe(400);
+    const same = await api(u.cookie, "POST", "/api/auth/password", { current: u.password, next: u.password });
+    expect(same.status).toBe(400);
+    expect(await same.json()).toEqual({ error: "same_password" });
     const ok = await api(u.cookie, "POST", "/api/auth/password", { current: u.password, next: "brand-new-password" });
     expect(ok.status).toBe(200);
 

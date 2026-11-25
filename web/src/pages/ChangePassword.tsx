@@ -6,6 +6,8 @@ import { AuthLayout } from "../components/AuthLayout";
 import { useToast } from "../components/Toast";
 import { useTitle } from "../lib/useTitle";
 
+const SAME_PASSWORD = "Choose a new password — it can't be the same as the temporary one.";
+
 export function ChangePassword() {
   useTitle("Change password");
   const { user, refresh, signOut } = useAuth();
@@ -23,6 +25,7 @@ export function ChangePassword() {
     if (!current) return setError("Please enter your current password.");
     if (next.length < 10) return setError("Choose a new password of at least 10 characters.");
     if (next !== again) return setError("The two new passwords don't match.");
+    if (next === current) return setError(SAME_PASSWORD);
     setBusy(true);
     setError("");
     try {
@@ -33,6 +36,7 @@ export function ChangePassword() {
     } catch (ex) {
       setBusy(false);
       if (ex instanceof ApiError && ex.code === "wrong_current_password") setError("Your current password isn't right.");
+      else if (ex instanceof ApiError && ex.code === "same_password") setError(SAME_PASSWORD);
       else setError(ex instanceof ApiError ? ex.message : "Something went wrong. Please try again.");
     }
   };

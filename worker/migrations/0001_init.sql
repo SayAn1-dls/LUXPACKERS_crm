@@ -55,6 +55,7 @@ CREATE TABLE task_comments (
   kind TEXT NOT NULL DEFAULT 'comment' CHECK (kind IN ('comment','sent_back','approved')),
   created_at TEXT NOT NULL
 );
+CREATE INDEX idx_task_comments_task ON task_comments(task_id, created_at);
 
 CREATE TABLE records (
   id TEXT PRIMARY KEY,
@@ -107,6 +108,7 @@ CREATE TABLE notifications (
   created_at TEXT NOT NULL
 );
 CREATE INDEX idx_notifications_user ON notifications(user_id, read_at);
+CREATE INDEX idx_notifications_user_created ON notifications(user_id, created_at);
 
 CREATE TABLE audit_log (
   id TEXT PRIMARY KEY,
@@ -129,6 +131,7 @@ CREATE TABLE login_attempts (
   email TEXT,
   at TEXT
 );
+CREATE INDEX idx_login_attempts_email ON login_attempts(email, at);
 
 INSERT INTO settings (key, value) VALUES
   ('leave_allowances', '{"Casual":12,"Sick":6,"Earned":15}'),

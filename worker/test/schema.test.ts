@@ -20,6 +20,14 @@ describe("scaffold", () => {
     for (const t of TABLES) expect(names).toContain(t);
   });
 
+  it("indexes the hot lookups", async () => {
+    const { results } = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index'").all<{ name: string }>();
+    const names = results.map((r) => r.name);
+    for (const i of ["idx_task_comments_task", "idx_notifications_user_created", "idx_login_attempts_email"]) {
+      expect(names).toContain(i);
+    }
+  });
+
   it("seeds settings", async () => {
     const { results } = await env.DB.prepare("SELECT key, value FROM settings").all<{ key: string; value: string }>();
     const m = Object.fromEntries(results.map((r) => [r.key, r.value]));
