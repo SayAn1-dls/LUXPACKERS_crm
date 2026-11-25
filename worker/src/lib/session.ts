@@ -85,6 +85,7 @@ export const readSession: MiddlewareHandler<AppEnv> = async (c, next) => {
           await c.env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?")
             .bind(new Date(Date.now() + LIFETIME_DAYS * DAY).toISOString(), sid)
             .run();
+          setSessionCookie(c, token);
         }
         c.set("user", {
           id: row.id,

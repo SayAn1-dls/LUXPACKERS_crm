@@ -176,4 +176,17 @@ describe("logout and session expiry", () => {
     const row: any = await env.DB.prepare("SELECT expires_at FROM sessions").first();
     expect(Date.parse(row.expires_at)).toBeGreaterThan(Date.now() + 13 * 86400000);
   });
+
+  it("re-sends the cookie with a fresh Max-Age when the session slides", async () => {
+    const u = await makeUser("employee", "Sales");
+    const soon = new Date(Date.now() + 2 * 86400000).toISOString();
+    await env.DB.prepare("UPDATE sessions SET expires_at = ?").bind(soon).run();
+    const r = await api(u.cookie, "GET", "/api/me");
+    const sc = r.headers.get("set-cookie") ?? "";
+    expect(sc).toContain(`${u.cookie};`);
+    expect(sc).toContain("Max-Age=1209600");
+    // no slide needed -> no cookie re-sent
+    const r2 = await api(u.cookie, "GET", "/api/me");
+    expect(r2.headers.get("set-cookie")).toBeNull();
+  });
 });
