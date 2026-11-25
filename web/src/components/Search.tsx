@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { safeInternal } from "../lib/safeInternal";
 
 interface Hit { kind: "task" | "record" | "person"; id: string; title: string; sub: string; link: string }
 
@@ -41,7 +42,8 @@ export function Search() {
     setText("");
     setQ("");
     setOpen(false);
-    navigate(h.link);
+    const to = safeInternal(h.link);
+    if (to) navigate(to);
   };
   const results = res.data?.results ?? [];
 

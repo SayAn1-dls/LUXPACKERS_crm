@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { safeInternal } from "../lib/safeInternal";
 
 interface Item { id: string; kind: string; title: string; link: string | null; readAt: string | null; createdAt: string }
 interface Feed { items: Item[]; unread: number }
@@ -51,7 +52,8 @@ export function NotificationBell() {
   const openItem = (it: Item) => {
     if (!it.readAt) markRead.mutate([it.id]);
     setOpen(false);
-    if (it.link) navigate(it.link);
+    const to = safeInternal(it.link);
+    if (to) navigate(to);
   };
 
   return (
