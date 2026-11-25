@@ -1,14 +1,15 @@
-import { createBrowserRouter, Navigate, Outlet, useLocation, useParams } from "react-router-dom";
-import { REGISTERS } from "../../shared/schema";
+import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
-import { Placeholder } from "./components/Placeholder";
+import { NotFound, Placeholder } from "./components/Placeholder";
 import { Shell } from "./components/Shell";
 import { ChangePassword } from "./pages/ChangePassword";
 import { Help } from "./pages/Help";
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
+import { Register } from "./pages/Register";
 import { Setup } from "./pages/Setup";
 import { Tasks } from "./pages/Tasks";
+import { Trash } from "./pages/Trash";
 import { useSetupNeeded } from "./lib/setupStatus";
 
 /** Signed-in area. Sends visitors to setup or sign-in, and forces a password change when required. */
@@ -31,16 +32,6 @@ function RequireUser() {
   return user ? <Outlet /> : <Navigate to="/login" replace />;
 }
 
-function RegisterPage() {
-  const { id } = useParams();
-  const reg = REGISTERS.find((r) => r.id === id);
-  return reg ? <Placeholder title={reg.name} eyebrow="Register" note={reg.intro} /> : <NotFound />;
-}
-
-function NotFound() {
-  return <Placeholder title="Page not found" note="That page does not exist. Use the menu on the left to find your way." />;
-}
-
 export const router = createBrowserRouter([
   {
     element: <AuthProvider />,
@@ -53,14 +44,14 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Home /> },
           { path: "tasks", element: <Tasks /> },
-          { path: "registers/:id", element: <RegisterPage /> },
+          { path: "registers/:id", element: <Register /> },
           { path: "people", element: <Placeholder title="People" /> },
           { path: "leave", element: <Placeholder title="Leave" /> },
           { path: "users", element: <Placeholder title="Users" eyebrow="Manage" /> },
           { path: "audit", element: <Placeholder title="Audit log" eyebrow="Administrator" /> },
           { path: "import", element: <Placeholder title="Import" eyebrow="Administrator" /> },
           { path: "settings", element: <Placeholder title="Settings" eyebrow="Administrator" /> },
-          { path: "trash", element: <Placeholder title="Trash" eyebrow="Administrator" /> },
+          { path: "trash", element: <Trash /> },
           { path: "help", element: <Help /> },
           { path: "*", element: <NotFound /> },
         ],

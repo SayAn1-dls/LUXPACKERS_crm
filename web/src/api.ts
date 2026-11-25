@@ -3,8 +3,11 @@
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  /** Set when the server names the field that failed validation. */
+  field?: string;
+  constructor(status: number, code: string, message: string, field?: string) {
     super(message);
+    this.field = field;
     this.name = "ApiError";
     this.status = status;
     this.code = code;
@@ -44,7 +47,7 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   const data: unknown = await res.json().catch(() => null);
   if (res.ok) return data as T;
 
-  const obj = (data && typeof data === "object" ? data : {}) as { error?: unknown; message?: unknown };
+  const obj = (data && typeof data === "object" ? data : {}) as { error?: unknown; message?: unknown; field?: unknown };
   const code = typeof obj.error === "string" ? obj.error : "error";
   const message = typeof obj.message === "string" ? obj.message : FALLBACK;
 
@@ -54,5 +57,5 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   } else if (res.status === 403 && code === "must_change_password") {
     hooks.onMustChangePassword?.();
   }
-  throw new ApiError(res.status, code, message);
+  throw new ApiError(res.status, code, message, typeof obj.field === "string" ? obj.field : undefined);
 }

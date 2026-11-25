@@ -15,3 +15,7 @@ export function Placeholder({ title, eyebrow, note }: { title: string; eyebrow?:
     </>
   );
 }
+
+export function NotFound() {
+  return <Placeholder title="Page not found" note="That page does not exist. Use the menu on the left to find your way." />;
+}
