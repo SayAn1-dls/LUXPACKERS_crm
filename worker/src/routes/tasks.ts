@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { DEPT_NAMES, TASK_PRIORITIES, TASK_STATUSES } from "../../../shared/schema";
-import type { Task, TaskComment } from "../../../shared/schema";
+import type { TaskComment } from "../../../shared/schema";
 import type { AppEnv, SessionUser } from "../env";
 import { auditStmt } from "../lib/audit";
 import { todayIST } from "../lib/dates";
@@ -9,6 +9,8 @@ import { notifyStmts } from "../lib/notify";
 import { canApproveTask, canAssignTo, canEditTaskStatus, canSeeTask } from "../lib/policy";
 import type { AssigneeRef, TaskRef } from "../lib/policy";
 import { requireUser } from "../lib/session";
+import { TASK_SELECT, parseLinks, taskAssigneeOf, taskRefOf, taskScopeWhere, taskToApi } from "../lib/taskScope";
+import type { TaskRow, TaskScope } from "../lib/taskScope";
 import { httpUrl } from "../lib/validate";
 
 const Dept = z.string().refine((d) => DEPT_NAMES.includes(d), "unknown department");
@@ -46,63 +48,10 @@ const PatchBody = z.object({
 const ActionBody = z.object({ version: z.number().int().min(1).optional(), comment: Text(5000).optional() });
 const CommentBody = z.object({ body: Text(5000).min(1) });
 
-interface TaskRow {
-  id: string;
-  title: string;
-  notes: string | null;
-  dept: string | null;
-  assignee_id: string | null;
-  assigned_by_id: string | null;
-  priority: string | null;
-  status: string;
-  due: string | null;
-  waiting_on: string | null;
-  links: string | null;
-  version: number;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  assignee_name: string | null;
-  assigned_by_name: string | null;
-  assignee_manager_id: string | null;
-}
-
-const SELECT = `SELECT t.*, a.name AS assignee_name, a.manager_id AS assignee_manager_id, b.name AS assigned_by_name
-  FROM tasks t LEFT JOIN users a ON a.id = t.assignee_id LEFT JOIN users b ON b.id = t.assigned_by_id`;
-
-const parseLinks = (s: string | null): string[] => {
-  try {
-    const v = JSON.parse(s ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-};
-
-const toApi = (r: TaskRow, today: string): Task => ({
-  id: r.id,
-  title: r.title,
-  notes: r.notes,
-  dept: r.dept,
-  assigneeId: r.assignee_id,
-  assigneeName: r.assignee_name,
-  assignedById: r.assigned_by_id,
-  assignedByName: r.assigned_by_name,
-  priority: r.priority as Task["priority"],
-  status: r.status as Task["status"],
-  due: r.due,
-  waitingOn: r.waiting_on,
-  links: parseLinks(r.links),
-  version: r.version,
-  late: !!r.due && r.due < today && r.status !== "Done",
-  createdAt: r.created_at,
-  updatedAt: r.updated_at,
-  completedAt: r.completed_at,
-});
-
-// DB dept / assigned_by_id are nullable. "" never matches a real user's dept or id.
-const refOf = (r: TaskRow): TaskRef => ({ assigneeId: r.assignee_id, assignedById: r.assigned_by_id ?? "", dept: r.dept ?? "" });
-const assigneeOf = (r: TaskRow): AssigneeRef | null => (r.assignee_id ? { managerId: r.assignee_manager_id } : null);
+const refOf = taskRefOf;
+const assigneeOf = taskAssigneeOf;
+const toApi = taskToApi;
+const SELECT = TASK_SELECT;
 
 const loadTask = (db: D1Database, id: string) => db.prepare(`${SELECT} WHERE t.id = ?`).bind(id).first<TaskRow>();
 
@@ -122,22 +71,7 @@ tasks.get("/", async (c) => {
   if (scope === "all" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
   if (scope === "team" && u.role !== "manager" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
 
-  const where: string[] = [];
-  const args: unknown[] = [];
-  if (scope === "mine") {
-    where.push("t.assignee_id = ?");
-    args.push(u.id);
-  } else if (scope === "assigned") {
-    where.push("t.assigned_by_id = ?");
-    args.push(u.id);
-  } else if (scope === "team") {
-    where.push("(t.dept = ? OR a.manager_id = ?)");
-    args.push(u.dept, u.id);
-  } else if (scope !== "all") {
-    // Default: everything on me or assigned by me.
-    where.push("(t.assignee_id = ? OR t.assigned_by_id = ?)");
-    args.push(u.id, u.id);
-  }
+  const { where, args } = taskScopeWhere(u, (scope ?? "default") as TaskScope);
   const status = c.req.query("status");
   if (status) {
     if (!(TASK_STATUSES as readonly string[]).includes(status)) return c.json({ error: "invalid" }, 400);

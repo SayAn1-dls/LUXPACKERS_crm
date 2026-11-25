@@ -72,6 +72,18 @@ async function usedByKind(db: D1Database, userId: string, year: string): Promise
   return Object.fromEntries(results.map((r) => [r.kind, r.used]));
 }
 
+/** Allowed / used / left per limited leave kind, for the current IST year. */
+export async function leaveBalance(db: D1Database, userId: string) {
+  const [{ leaveAllowances }, used] = await Promise.all([loadSettings(db), usedByKind(db, userId, todayIST().slice(0, 4))]);
+  const balance: Record<string, { allowed: number; used: number; left: number }> = {};
+  for (const k of LIMITED) {
+    const allowed = leaveAllowances[k];
+    const taken = used[k] ?? 0;
+    balance[k] = { allowed, used: taken, left: allowed - taken };
+  }
+  return balance;
+}
+
 const link = "/leave";
 
 export const leave = new Hono<AppEnv>();
@@ -91,13 +103,7 @@ leave.get("/", async (c) => {
   const requests = results.map(toApi);
   if (scope !== "mine") return c.json({ requests });
 
-  const [{ leaveAllowances }, used] = await Promise.all([loadSettings(db), usedByKind(db, u.id, todayIST().slice(0, 4))]);
-  const balance: Record<string, { allowed: number; used: number; left: number }> = {};
-  for (const k of LIMITED) {
-    const allowed = leaveAllowances[k];
-    const taken = used[k] ?? 0;
-    balance[k] = { allowed, used: taken, left: allowed - taken };
-  }
+  const balance = await leaveBalance(db, u.id);
   return c.json({ requests, balance });
 });
 
