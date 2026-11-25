@@ -234,6 +234,19 @@ describe("update", () => {
     const ok = await api(e.cookie, "PATCH", `/api/records/bookings/${record.id}`, { version: 1, data: { trip: "x" } });
     expect(ok.status).toBe(200);
   });
+  it("a legacy row already missing a required field can still be patched", async () => {
+    const e = await makeUser("employee", SALES);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT INTO records (id, collection, dept, title, data, version, created_at, updated_at) VALUES (?, 'bookings', ?, '', '{}', 1, ?, ?)",
+    ).bind(id, SALES, now, now).run();
+    const res = await api(e.cookie, "PATCH", `/api/records/bookings/${id}`, { version: 1, data: { trip: "X" } });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).record.data.trip).toBe("X");
+    const clear = await api(e.cookie, "PATCH", `/api/records/bookings/${id}`, { version: 2, data: { guest: "" } });
+    expect(clear.status).toBe(400);
+  });
   it("clearing an optional value with null removes it", async () => {
     const e = await makeUser("employee", SALES);
     const { record } = await mkBooking(e, { trip: "Bali" });

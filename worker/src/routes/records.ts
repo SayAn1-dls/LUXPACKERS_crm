@@ -265,8 +265,11 @@ records.patch("/:collection/:id", async (c) => {
   const old = parseData(row.data);
   let data: Data;
   try {
-    data = applyData(reg, old, b.data ?? {});
-    for (const f of reg.fields) if (f.required && isEmpty(data[f.key])) throw new Invalid(f.key);
+    const input = b.data ?? {};
+    data = applyData(reg, old, input);
+    for (const f of reg.fields) {
+      if (f.required && Object.hasOwn(input, f.key) && isEmpty(data[f.key])) throw new Invalid(f.key);
+    }
   } catch (e) {
     if (e instanceof Invalid) return invalid(c, e.field);
     throw e;
