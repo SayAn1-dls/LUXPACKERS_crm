@@ -1,12 +1,27 @@
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "react-router-dom";
+import { ApiError } from "./api";
+import { ToastProvider } from "./components/Toast";
+import { router } from "./router";
+import "./styles.css";
 
-function App() {
-  return (
-    <main style={{ fontFamily: "Jost, sans-serif", color: "#11181C", background: "#F6F5F1", minHeight: "100vh", padding: "48px" }}>
-      <h1 style={{ fontFamily: "'Cormorant Garamond', serif", color: "#7A2333", fontWeight: 600 }}>Luxpackers CRM</h1>
-      <p>The new CRM is being built. Nothing to see here yet.</p>
-    </main>
-  );
-}
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+    },
+  },
+});
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>
+    </QueryClientProvider>
+  </StrictMode>,
+);
