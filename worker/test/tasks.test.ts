@@ -425,3 +425,41 @@ describe("task links are http(s) only", () => {
     expect(r.status).toBe(200);
   });
 });
+
+describe("every review-loop bypass from Submitted is blocked", () => {
+  async function submitted() {
+    const mgr = await makeUser("manager", OPS);
+    const e = await makeUser("employee", OPS);
+    const peer = await makeUser("employee", OPS);
+    const t = (await mkTask(mgr, { assigneeId: e.id })).task;
+    await api(e.cookie, "POST", `/api/tasks/${t.id}/submit`, {});
+    return { mgr, e, peer, t };
+  }
+  const patch = (u: U, id: string, status: string) => api(u.cookie, "PATCH", `/api/tasks/${id}`, { version: 2, status });
+
+  it("approver: In progress / Waiting / Blocked -> 400 use_send_back", async () => {
+    const { mgr, t } = await submitted();
+    for (const st of ["In progress", "Waiting", "Blocked"]) {
+      const r = await patch(mgr, t.id, st);
+      expect(r.status).toBe(400);
+      expect(((await r.json()) as any).error).toBe("use_send_back");
+    }
+  });
+
+  it("assignee may withdraw Submitted -> In progress, nothing else", async () => {
+    const { e, t } = await submitted();
+    for (const st of ["To do", "Waiting", "Blocked", "Done"]) {
+      const r = await patch(e, t.id, st);
+      expect(r.status).toBe(400);
+      expect(((await r.json()) as any).error).toBe("use_send_back");
+    }
+    const ok = await patch(e, t.id, "In progress");
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as any).task.status).toBe("In progress");
+  });
+
+  it("non-approver non-assignee still gets 403 (or 404 if they cannot see it)", async () => {
+    const { peer, t } = await submitted();
+    expect((await patch(peer, t.id, "In progress")).status).toBe(404);
+  });
+});

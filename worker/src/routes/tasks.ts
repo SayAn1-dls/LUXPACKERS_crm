@@ -250,10 +250,13 @@ tasks.patch("/:id", async (c) => {
   if (fields.includes("status")) {
     const next = body.status as string;
     if (next === "Submitted") return c.json({ error: "use_submit" }, 400);
+    // From Submitted, the only ways out are the review endpoints (approve / send-back),
+    // or the assignee withdrawing their own submission back to "In progress".
+    if (row.status === "Submitted") {
+      if (approver) return c.json({ error: next === "Done" ? "use_approve" : "use_send_back" }, 400);
+      if (isAssignee && next !== "In progress") return c.json({ error: "use_send_back" }, 400);
+    }
     if (!canEditTaskStatus(u, ref, next, assignee)) return c.json({ error: "forbidden" }, 403);
-    // Approving / sending back must go through the review endpoints (comment, notification, history).
-    if (row.status === "Submitted" && next === "Done") return c.json({ error: "use_approve" }, 400);
-    if (row.status === "Submitted" && next === "To do") return c.json({ error: "use_send_back" }, 400);
     // Reopening a Done task assigned by someone else is approver-only.
     if (row.status === "Done" && row.assigned_by_id !== row.assignee_id && !approver) {
       return c.json({ error: "forbidden" }, 403);
