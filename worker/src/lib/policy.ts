@@ -56,6 +56,7 @@ export function canEditTaskStatus(u: SessionUser, t: TaskRef, next: string, assi
   return next === "Done" && t.assignedById === t.assigneeId;
 }
 
+/** Governs create / disable / reset-password by the target's role. Role changes must use canChangeRole. */
 export function canManageUser(u: SessionUser, targetRole: Role): boolean {
   if (!(ROLES as readonly string[]).includes(targetRole)) return false;
   if (u.role === "admin") return true;
@@ -64,7 +65,20 @@ export function canManageUser(u: SessionUser, targetRole: Role): boolean {
 
 export function canDecideLeave(u: SessionUser, requester: { id: string; managerId: string | null }): boolean {
   if (u.id === requester.id) return false;
-  return u.role === "admin" || u.role === "hr" || (requester.managerId !== null && requester.managerId === u.id);
+  if (u.role === "admin" || u.role === "hr") return true;
+  return u.role === "manager" && requester.managerId !== null && requester.managerId === u.id;
+}
+
+const isKnownRole = (r: string) => (ROLES as readonly string[]).includes(r);
+
+/** Changing someone's role: admin only (HR cannot escalate or demote). */
+export function canChangeRole(u: SessionUser, fromRole: string, toRole: string): boolean {
+  return u.role === "admin" && isKnownRole(fromRole) && isKnownRole(toRole);
+}
+
+/** Profile fields only (name, title, phone, dept, managerId, kind, joinedOn, status); never role. */
+export function canEditProfile(u: SessionUser, targetRole: string): boolean {
+  return (u.role === "admin" || u.role === "hr") && isKnownRole(targetRole);
 }
 
 export function canSeePeoplePrivate(u: SessionUser): boolean {

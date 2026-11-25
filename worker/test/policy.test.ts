@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Role, SessionUser } from "../src/env";
 import {
-  canApproveTask, canAssignTo, canDecideLeave, canDeleteRecord, canEditTaskStatus,
+  canApproveTask, canAssignTo, canChangeRole, canEditProfile, canDecideLeave, canDeleteRecord, canEditTaskStatus,
   canManageUser, canReadRegister, canSeePeoplePrivate, canSeeTask, canWriteRegister,
   type AssigneeRef, type TaskRef,
 } from "../src/lib/policy";
@@ -212,5 +212,41 @@ describe("canDecideLeave", () => {
 describe("canSeePeoplePrivate", () => {
   it.each([["admin", true], ["hr", true], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
     expect(canSeePeoplePrivate(mk(r, SALES))).toBe(exp);
+  });
+});
+
+describe("canDecideLeave role check", () => {
+  const req = { id: "r", managerId: "mgr" };
+  it("employee who is someone's managerId cannot decide", () => {
+    expect(canDecideLeave(mk("employee", SALES, "mgr"), req)).toBe(false);
+  });
+  it("manager with that id can", () => {
+    expect(canDecideLeave(mk("manager", SALES, "mgr"), req)).toBe(true);
+  });
+});
+
+describe("canChangeRole", () => {
+  it.each([["admin", true], ["hr", false], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
+    expect(canChangeRole(mk(r, SALES), "employee", "manager")).toBe(exp);
+  });
+  it("hr cannot escalate or demote", () => {
+    expect(canChangeRole(mk("hr", SALES), "employee", "admin")).toBe(false);
+    expect(canChangeRole(mk("hr", SALES), "manager", "employee")).toBe(false);
+  });
+  it("unknown roles denied, even for admin", () => {
+    const a = mk("admin", MGMT);
+    expect(canChangeRole(a, "root", "employee")).toBe(false);
+    expect(canChangeRole(a, "employee", "root")).toBe(false);
+    expect(canChangeRole(a, "", "")).toBe(false);
+  });
+});
+
+describe("canEditProfile", () => {
+  it.each([["admin", true], ["hr", true], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
+    for (const target of ROLES) expect(canEditProfile(mk(r, SALES), target)).toBe(exp);
+  });
+  it("unknown target role denied", () => {
+    expect(canEditProfile(mk("admin", MGMT), "root")).toBe(false);
+    expect(canEditProfile(mk("hr", SALES), "")).toBe(false);
   });
 });
