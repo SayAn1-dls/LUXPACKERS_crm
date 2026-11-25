@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import type { AppEnv } from "./env";
 import { csrf, mustChangeGuard, readSession, requireUser } from "./lib/session";
 import { auth } from "./routes/auth";
+import { leave } from "./routes/leave";
 import { people } from "./routes/people";
 import { records } from "./routes/records";
 import { tasks } from "./routes/tasks";
+import { settings } from "./routes/settings";
 import { setup } from "./routes/setup";
 import { users } from "./routes/users";
 
@@ -20,6 +22,8 @@ app.route("/api/users", users);
 app.route("/api/people", people);
 app.route("/api/tasks", tasks);
 app.route("/api/records", records);
+app.route("/api/leave", leave);
+app.route("/api/settings", settings);
 app.get("/api/me", requireUser, (c) => c.json({ user: c.var.user }));
 
 app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
