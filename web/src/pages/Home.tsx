@@ -1,10 +1,12 @@
 import { useAuth } from "../auth";
+import { EmployeeHome } from "../dashboards/EmployeeHome";
 import { greeting, longDate, useTitle } from "../lib/useTitle";
 
-/** Role dashboards (EmployeeHome, ManagerHome, HrHome, AdminHome) replace the body in later tasks. */
+/** The home page depends on the role. Manager, HR and admin dashboards arrive in later tasks. */
 export function Home() {
   const { user } = useAuth();
   useTitle("Home");
+  if (user?.role === "employee") return <EmployeeHome />;
   return (
     <div className="page-head">
       <div>

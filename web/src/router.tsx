@@ -8,6 +8,7 @@ import { Help } from "./pages/Help";
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
 import { Setup } from "./pages/Setup";
+import { Tasks } from "./pages/Tasks";
 import { useSetupNeeded } from "./lib/setupStatus";
 
 /** Signed-in area. Sends visitors to setup or sign-in, and forces a password change when required. */
@@ -51,7 +52,7 @@ export const router = createBrowserRouter([
         element: <RequireAuth />,
         children: [
           { index: true, element: <Home /> },
-          { path: "tasks", element: <Placeholder title="My tasks" /> },
+          { path: "tasks", element: <Tasks /> },
           { path: "registers/:id", element: <RegisterPage /> },
           { path: "people", element: <Placeholder title="People" /> },
           { path: "leave", element: <Placeholder title="Leave" /> },
