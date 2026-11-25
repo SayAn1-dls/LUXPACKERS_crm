@@ -5,5 +5,5 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 export default defineConfig({
   root: "web",
   plugins: [react(), cloudflare({ configPath: "../wrangler.jsonc" })],
-  build: { outDir: "../dist/client", emptyOutDir: true },
+  build: { outDir: "../dist", emptyOutDir: true },
 });
