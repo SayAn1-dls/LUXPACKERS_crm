@@ -56,6 +56,21 @@ describe("audit", () => {
     expect((await api(hr.cookie, "GET", "/api/audit")).status).toBe(403);
   });
 
+  it("pages through rows that share a timestamp without skipping or repeating", async () => {
+    const admin = await makeUser("admin", "Management");
+    for (let i = 0; i < 3; i++) {
+      await env.DB.prepare("INSERT INTO audit_log (id, at, user_id, action, entity, entity_id, title) VALUES (?, '2031-05-05T00:00:00.000Z', ?, 'a', 'task', ?, ?)")
+        .bind(crypto.randomUUID(), admin.id, `s${i}`, `S${i}`).run();
+    }
+    const p1 = (await (await api(admin.cookie, "GET", "/api/audit?limit=2")).json()) as any;
+    expect(p1.items).toHaveLength(2);
+    const p2 = (await (await api(admin.cookie, "GET", `/api/audit?limit=2&before=${encodeURIComponent(p1.next)}`)).json()) as any;
+    expect(p2.items).toHaveLength(1);
+    expect(p2.next).toBeNull();
+    expect(new Set([...p1.items, ...p2.items].map((x: any) => x.id)).size).toBe(3);
+    expect((await api(admin.cookie, "GET", "/api/audit?before=2031-05-05T00:00:00.000Z%7Cabc")).status).toBe(400);
+  });
+
   it("pages with before cursor, limit clamps, names included", async () => {
     const admin = await makeUser("admin", "Management");
     for (let i = 0; i < 5; i++) {
@@ -65,7 +80,7 @@ describe("audit", () => {
     const p1 = (await (await api(admin.cookie, "GET", "/api/audit?limit=2")).json()) as any;
     expect(p1.items.map((x: any) => x.title)).toEqual(["T4", "T3"]);
     expect(p1.items[0].userName).toContain("admin");
-    expect(p1.next).toBe("2030-01-04T00:00:00.000Z");
+    expect(p1.next).toMatch(/^2030-01-04T00:00:00\.000Z\|\d+$/);
     const p2 = (await (await api(admin.cookie, "GET", `/api/audit?limit=2&before=${p1.next}`)).json()) as any;
     expect(p2.items.map((x: any) => x.title)).toEqual(["T2", "T1"]);
     const last = (await (await api(admin.cookie, "GET", `/api/audit?before=2030-01-02T00:00:00.000Z`)).json()) as any;

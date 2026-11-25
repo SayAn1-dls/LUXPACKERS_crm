@@ -54,6 +54,20 @@ describe("search", () => {
     expect(ab.results).toHaveLength(2);
   });
 
+  it("manager finds reports' and dept tasks; employee cannot find a stranger's", async () => {
+    const mgr = await makeUser("manager", "Operations");
+    const rep = await makeUser("employee", "Finance", { managerId: mgr.id });
+    const peer = await makeUser("employee", "Operations");
+    const stranger = await makeUser("employee", "Finance");
+    const a = await seedTask({ title: "Lemur report", dept: "Finance", assignee: rep.id, by: rep.id });
+    const b = await seedTask({ title: "Lemur dept", dept: "Operations", assignee: peer.id, by: peer.id });
+    await seedTask({ title: "Lemur stranger", dept: "Finance", assignee: stranger.id, by: stranger.id });
+    const mb = (await (await search(mgr, "lemur")).json()) as any;
+    expect(mb.results.map((r: any) => r.id).sort()).toEqual([a, b].sort());
+    const eb = (await (await search(peer, "lemur")).json()) as any;
+    expect(eb.results.map((r: any) => r.id)).toEqual([b]);
+  });
+
   it("people by name; left people only for hr/admin", async () => {
     const e = await makeUser("employee", "Operations");
     const hr = await makeUser("hr", "People & Interns");

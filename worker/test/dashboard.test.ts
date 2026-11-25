@@ -190,6 +190,23 @@ describe("admin dashboard", () => {
     }
   });
 
+  it("figures.late counts overdue tasks plus overdue lead follow-ups", async () => {
+    const admin = await makeUser("admin", "Management");
+    const e = await makeUser("employee", OPS);
+    await seedTask({ assignee: e.id, by: admin.id, due: addDays(today(), -1) });
+    await seedRecord("leads", "late lead", { stage: "Contacted", followUp: addDays(today(), -1) });
+    await seedRecord("leads", "closed late lead", { stage: "Lost", followUp: addDays(today(), -1) });
+    expect((await get(admin)).figures.late).toBe(2);
+  });
+
+  it("next7 keeps fully paid bookings but drops cancelled ones", async () => {
+    const admin = await makeUser("admin", "Management");
+    const t = today();
+    const paid = await seedRecord("bookings", "paid", { payStatus: "Fully paid", start: addDays(t, 3) });
+    await seedRecord("bookings", "cancelled", { payStatus: "Cancelled", start: addDays(t, 3) });
+    expect((await get(admin)).next7.map((x: any) => x.id)).toEqual([paid]);
+  });
+
   it("attention order: late tasks, Blocked, late lead follow-ups, High priority; max 9", async () => {
     const admin = await makeUser("admin", "Management");
     const e = await makeUser("employee", OPS);

@@ -19,7 +19,7 @@ search.get("/", async (c) => {
   const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
   const hits: Hit[] = [];
 
-  const scope = taskScopeWhere(u, u.role === "admin" ? "all" : "default");
+  const scope = taskScopeWhere(u, "visible");
   const tasks = await db
     .prepare(`${TASK_SELECT} WHERE ${[...scope.where, "t.title LIKE ? ESCAPE '\\'"].join(" AND ")} ORDER BY t.updated_at DESC LIMIT ${MAX}`)
     .bind(...scope.args, like)

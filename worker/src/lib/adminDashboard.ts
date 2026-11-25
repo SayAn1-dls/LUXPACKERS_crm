@@ -1,86 +1,131 @@
-/* Admin-only dashboard sections (ported from the legacy overviewPage): figures, attention, next7, departments, latest. */
+/* Admin-only dashboard sections (ported from the legacy overviewPage): figures, attention, next7, departments, latest.
+   Everything is computed with SQL aggregates / bounded queries so one request stays cheap. */
 import { DEPARTMENTS, REGISTERS } from "../../../shared/schema";
+import type { RegisterDef } from "../../../shared/schema";
 import { auditFeed } from "./auditFeed";
 import { TASK_SELECT } from "./taskScope";
 import type { TaskRow } from "./taskScope";
 
-type Data = Record<string, any>;
-interface RecRow { id: string; title: string | null; dept: string | null; owner_name: string | null; data: string }
-
-const parse = (s: string): Data => {
-  try {
-    const v = JSON.parse(s);
-    return v && typeof v === "object" ? v : {};
-  } catch {
-    return {};
-  }
-};
-
 export const addDays = (ymd: string, n: number) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-const records = async (db: D1Database, collection: string) =>
-  (
-    await db
-      .prepare(
-        `SELECT r.id, r.title, r.dept, o.name AS owner_name, r.data FROM records r LEFT JOIN users o ON o.id = r.owner_id
-         WHERE r.collection = ? AND r.deleted_at IS NULL ORDER BY r.created_at, r.rowid`,
-      )
-      .bind(collection)
-      .all<RecRow>()
-  ).results.map((r) => ({ ...r, d: parse(r.data) }));
+const reg = (id: string) => REGISTERS.find((r) => r.id === id)!;
+// Keys below come from the shared schema constants only, never from user input.
+const field = (key: string) => `json_extract(r.data, '$.${key}')`;
+const openSql = (def: RegisterDef) =>
+  def.doneValues.length ? `COALESCE(${field(def.statusKey)}, '') NOT IN (${def.doneValues.map(() => "?").join(",")})` : "1 = 1";
+
+interface RecRow { id: string; title: string | null; dept: string | null; owner_name: string | null; due: string | null; stage?: string }
+
+const LIMIT = 9;
 
 export async function adminSections(db: D1Database, today: string) {
   const month = today.slice(0, 7);
   const end = addDays(today, 7);
-  const open = (
-    await db.prepare(`${TASK_SELECT} WHERE t.status != 'Done' ORDER BY t.due IS NULL, t.due, t.created_at`).all<TaskRow>()
-  ).results;
-  const late = (t: TaskRow) => !!t.due && t.due < today;
+  const leads = reg("leads");
+  const leadOpen = openSql(leads);
+  const leadArgs = [...leads.doneValues];
+  const leadBase = `FROM records r WHERE r.collection = 'leads' AND r.deleted_at IS NULL AND ${leadOpen}`;
+  const lateLeadWhere = `${field("followUp")} IS NOT NULL AND ${field("followUp")} < ?`;
 
-  const [leads, finance, trips] = await Promise.all([records(db, "leads"), records(db, "finance"), records(db, "trips")]);
-  const leadsDone = new Set(REGISTERS.find((r) => r.id === "leads")!.doneValues);
-  const openLeads = leads.filter((l) => !leadsDone.has(l.d.stage));
-  const lateLeads = openLeads.filter((l) => l.d.followUp && l.d.followUp < today);
+  const [t, l, lateLeads, fin, trips] = await Promise.all([
+    db
+      .prepare(
+        `SELECT COUNT(*) AS open, COALESCE(SUM(due IS NOT NULL AND due < ?), 0) AS late, COALESCE(SUM(status = 'Waiting'), 0) AS waiting
+         FROM tasks WHERE status != 'Done'`,
+      )
+      .bind(today)
+      .first<{ open: number; late: number; waiting: number }>(),
+    db
+      .prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(CAST(${field("quote")} AS REAL)), 0) AS quoted ${leadBase}`)
+      .bind(...leadArgs)
+      .first<{ n: number; quoted: number }>(),
+    db
+      .prepare(`SELECT COUNT(*) AS n ${leadBase} AND ${lateLeadWhere}`)
+      .bind(...leadArgs, today)
+      .first<{ n: number }>(),
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(CAST(${field("amount")} AS REAL)), 0) AS total FROM records r
+         WHERE r.collection = 'finance' AND r.deleted_at IS NULL AND ${field("flow")} = 'In' AND ${field("status")} = 'Paid'
+         AND ${field("date")} LIKE ?`,
+      )
+      .bind(`${month}%`)
+      .first<{ total: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS total, COALESCE(SUM(${field("status")} = 'Live'), 0) AS live FROM records r
+         WHERE r.collection = 'trips' AND r.deleted_at IS NULL`,
+      )
+      .first<{ total: number; live: number }>(),
+  ]);
 
+  // Legacy "Overdue" figure is tasks and lead follow-ups together.
   const figures = {
-    openTasks: open.length,
-    late: open.filter(late).length,
-    waiting: open.filter((t) => t.status === "Waiting").length,
-    openEnquiries: openLeads.length,
-    quoted: openLeads.reduce((s, l) => s + (Number(l.d.quote) || 0), 0),
-    receivedThisMonth: finance
-      .filter((f) => f.d.flow === "In" && f.d.status === "Paid" && typeof f.d.date === "string" && f.d.date.startsWith(month))
-      .reduce((s, f) => s + (Number(f.d.amount) || 0), 0),
-    tripsLive: trips.filter((t) => t.d.status === "Live").length,
-    tripsTotal: trips.length,
+    openTasks: t!.open,
+    late: t!.late + lateLeads!.n,
+    waiting: t!.waiting,
+    openEnquiries: l!.n,
+    quoted: l!.quoted,
+    receivedThisMonth: fin!.total,
+    tripsLive: trips!.live,
+    tripsTotal: trips!.total,
   };
 
-  const taskItem = (t: TaskRow, why: string) => ({
-    kind: "task" as const, id: t.id, title: t.title, why, owner: t.assignee_name, dept: t.dept, link: `/tasks?open=${t.id}`,
+  const tasks = (where: string, args: unknown[], order = "t.due, t.created_at") =>
+    db
+      .prepare(`${TASK_SELECT} WHERE t.status != 'Done' AND ${where} ORDER BY ${order} LIMIT ${LIMIT}`)
+      .bind(...args)
+      .all<TaskRow>()
+      .then((r) => r.results);
+  const [lateTasks, blocked, lateLeadRows, high] = await Promise.all([
+    tasks("t.due IS NOT NULL AND t.due < ?", [today]),
+    tasks("t.status = 'Blocked' AND (t.due IS NULL OR t.due >= ?)", [today], "t.created_at"),
+    db
+      .prepare(
+        `SELECT r.id, r.title, r.dept, o.name AS owner_name, ${field("followUp")} AS due ${leadBase.replace("FROM records r", "FROM records r LEFT JOIN users o ON o.id = r.owner_id")}
+         AND ${lateLeadWhere} ORDER BY due LIMIT ${LIMIT}`,
+      )
+      .bind(...leadArgs, today)
+      .all<RecRow>()
+      .then((r) => r.results),
+    tasks("t.priority = 'High' AND t.status != 'Blocked' AND (t.due IS NULL OR t.due >= ?)", [today], "t.due IS NULL, t.due, t.created_at"),
+  ]);
+  const taskItem = (x: TaskRow, why: string) => ({
+    kind: "task" as const, id: x.id, title: x.title, why, owner: x.assignee_name, dept: x.dept, link: `/tasks?open=${x.id}`,
   });
   const attention = [
-    ...open.filter(late).map((t) => taskItem(t, `Overdue since ${t.due}`)),
-    ...open.filter((t) => t.status === "Blocked" && !late(t)).map((t) => taskItem(t, "Blocked")),
-    ...lateLeads.map((l) => ({
-      kind: "record" as const, id: l.id, title: l.title ?? "", why: `Follow-up was due ${l.d.followUp}`, owner: l.owner_name,
-      dept: l.dept, link: `/registers/leads?open=${l.id}`,
+    ...lateTasks.map((x) => taskItem(x, `Overdue since ${x.due}`)),
+    ...blocked.map((x) => taskItem(x, "Blocked")),
+    ...lateLeadRows.map((x) => ({
+      kind: "record" as const, id: x.id, title: x.title ?? "", why: `Follow-up was due ${x.due}`, owner: x.owner_name, dept: x.dept,
+      link: `/registers/leads?open=${x.id}`,
     })),
-    ...open.filter((t) => t.priority === "High" && !late(t) && t.status !== "Blocked").map((t) => taskItem(t, `High priority · due ${t.due ?? "not set"}`)),
-  ].slice(0, 9);
+    ...high.map((x) => taskItem(x, `High priority · due ${x.due ?? "not set"}`)),
+  ].slice(0, LIMIT);
 
-  const next7: { kind: "task" | "record"; id: string; title: string; label: string; due: string; link: string }[] = open
-    .filter((t) => t.due && t.due >= today && t.due <= end)
-    .map((t) => ({ kind: "task" as const, id: t.id, title: t.title, label: "Task", due: t.due!, link: `/tasks?open=${t.id}` }));
-  for (const reg of REGISTERS.filter((r) => r.dueKey)) {
-    const rows = reg.id === "leads" ? leads : reg.id === "finance" ? finance : await records(db, reg.id);
-    for (const r of rows) {
-      const due = r.d[reg.dueKey!];
-      const isOpen = reg.doneValues.length === 0 || !reg.doneValues.includes(r.d[reg.statusKey]);
-      if (typeof due === "string" && due >= today && due <= end && isOpen) {
-        next7.push({ kind: "record", id: r.id, title: r.title ?? "", label: reg.name, due, link: `/registers/${reg.id}?open=${r.id}` });
-      }
-    }
-  }
+  const next7: { kind: "task" | "record"; id: string; title: string; label: string; due: string; link: string }[] = (
+    await db
+      .prepare(`${TASK_SELECT} WHERE t.status != 'Done' AND t.due >= ? AND t.due <= ? ORDER BY t.due, t.created_at LIMIT 20`)
+      .bind(today, end)
+      .all<TaskRow>()
+  ).results.map((x) => ({ kind: "task" as const, id: x.id, title: x.title, label: "Task", due: x.due!, link: `/tasks?open=${x.id}` }));
+  const regRows = await Promise.all(
+    REGISTERS.filter((r) => r.dueKey).map(async (def) => {
+      // Bookings stay on the list until cancelled (even when fully paid): the trip still has to happen.
+      const open = def.id === "bookings" ? `COALESCE(${field(def.statusKey)}, '') != 'Cancelled'` : openSql(def);
+      const args = def.id === "bookings" ? [] : def.doneValues;
+      const { results } = await db
+        .prepare(
+          `SELECT r.id, r.title, ${field(def.dueKey!)} AS due FROM records r
+           WHERE r.collection = ? AND r.deleted_at IS NULL AND ${field(def.dueKey!)} BETWEEN ? AND ? AND ${open}
+           ORDER BY due LIMIT 20`,
+        )
+        .bind(def.id, today, end, ...args)
+        .all<RecRow>();
+      return results.map((r) => ({ kind: "record" as const, id: r.id, title: r.title ?? "", label: def.name, due: r.due!, link: `/registers/${def.id}?open=${r.id}` }));
+    }),
+  );
+  next7.push(...regRows.flat());
   next7.sort((a, b) => a.due.localeCompare(b.due));
 
   const { results: dept } = await db
