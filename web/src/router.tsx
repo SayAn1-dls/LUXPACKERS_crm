@@ -1,15 +1,21 @@
 import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
-import { NotFound, Placeholder } from "./components/Placeholder";
+import { NotFound } from "./components/Placeholder";
 import { Shell } from "./components/Shell";
 import { ChangePassword } from "./pages/ChangePassword";
+import { Audit } from "./pages/Audit";
 import { Help } from "./pages/Help";
 import { Home } from "./pages/Home";
+import { Import } from "./pages/Import";
+import { Leave } from "./pages/Leave";
 import { Login } from "./pages/Login";
+import { People } from "./pages/People";
 import { Register } from "./pages/Register";
+import { Settings } from "./pages/Settings";
 import { Setup } from "./pages/Setup";
 import { Tasks } from "./pages/Tasks";
 import { Trash } from "./pages/Trash";
+import { Users } from "./pages/Users";
 import { useSetupNeeded } from "./lib/setupStatus";
 
 /** Signed-in area. Sends visitors to setup or sign-in, and forces a password change when required. */
@@ -45,12 +51,12 @@ export const router = createBrowserRouter([
           { index: true, element: <Home /> },
           { path: "tasks", element: <Tasks /> },
           { path: "registers/:id", element: <Register /> },
-          { path: "people", element: <Placeholder title="People" /> },
-          { path: "leave", element: <Placeholder title="Leave" /> },
-          { path: "users", element: <Placeholder title="Users" eyebrow="Manage" /> },
-          { path: "audit", element: <Placeholder title="Audit log" eyebrow="Administrator" /> },
-          { path: "import", element: <Placeholder title="Import" eyebrow="Administrator" /> },
-          { path: "settings", element: <Placeholder title="Settings" eyebrow="Administrator" /> },
+          { path: "people", element: <People /> },
+          { path: "leave", element: <Leave /> },
+          { path: "users", element: <Users /> },
+          { path: "audit", element: <Audit /> },
+          { path: "import", element: <Import /> },
+          { path: "settings", element: <Settings /> },
           { path: "trash", element: <Trash /> },
           { path: "help", element: <Help /> },
           { path: "*", element: <NotFound /> },
