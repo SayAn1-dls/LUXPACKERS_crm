@@ -4,12 +4,12 @@ export type Role = "admin" | "manager" | "hr" | "employee";
 
 export interface SessionUser {
   id: string;
-  email: string;
   name: string;
+  email: string;
   role: Role;
   dept: string;
-  manager_id: string | null;
-  must_change_password: number;
+  managerId: string | null;
+  mustChangePassword: boolean;
 }
 
 export interface Env {
@@ -17,4 +17,6 @@ export interface Env {
   ASSETS: Fetcher;
 }
 
-export type AppContext = Context<{ Bindings: Env; Variables: { user?: SessionUser } }>;
+export type AppEnv = { Bindings: Env; Variables: { user: SessionUser | null } };
+
+export type AppContext = Context<AppEnv>;
