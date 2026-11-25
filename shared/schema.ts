@@ -238,3 +238,38 @@ export const REGISTERS: RegisterDef[] = [
 export function registerDepts(registerId: string): string[] {
   return DEPARTMENTS.filter((d) => d.registers.includes(registerId)).map((d) => d.name);
 }
+
+export const TASK_PRIORITIES = ["High", "Medium", "Low"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+/** Task as returned by the API. */
+export interface Task {
+  id: string;
+  title: string;
+  notes: string | null;
+  dept: string | null;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  assignedById: string | null;
+  assignedByName: string | null;
+  priority: TaskPriority | null;
+  status: TaskStatus;
+  due: string | null;
+  waitingOn: string | null;
+  links: string[];
+  version: number;
+  late: boolean;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  userId: string;
+  userName: string;
+  body: string;
+  kind: "comment" | "sent_back" | "approved";
+  createdAt: string;
+}
