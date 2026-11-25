@@ -13,7 +13,17 @@ import { requireUser } from "../lib/session";
 const Dept = z.string().refine((d) => DEPT_NAMES.includes(d), "unknown department");
 const Date10 = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Text = (n: number) => z.string().trim().max(n);
-const Links = z.array(z.string().trim().min(1).max(2000)).max(20);
+const httpUrl = (x: string) => {
+  try {
+    return ["http:", "https:"].includes(new URL(x).protocol);
+  } catch {
+    return false;
+  }
+};
+const Links = z.array(z.string().trim().min(1).max(2000).refine(httpUrl, "http(s) links only")).max(20);
+
+const invalid = (e: z.ZodError) =>
+  e.issues.some((i) => i.path[0] === "links") ? { error: "invalid", field: "links" } : { error: "invalid" };
 
 const CreateBody = z.object({
   title: Text(300).min(1),
@@ -174,7 +184,7 @@ tasks.get("/:id", async (c) => {
 tasks.post("/", async (c) => {
   const u = c.var.user!;
   const parsed = CreateBody.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: "invalid" }, 400);
+  if (!parsed.success) return c.json(invalid(parsed.error), 400);
   const b = parsed.data;
   const db = c.env.DB;
   const assigneeId = b.assigneeId ?? u.id;
@@ -220,7 +230,7 @@ tasks.patch("/:id", async (c) => {
   const row = await visibleTask(c);
   if (!row) return c.json({ error: "not_found" }, 404);
   const parsed = PatchBody.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: "invalid" }, 400);
+  if (!parsed.success) return c.json(invalid(parsed.error), 400);
   const { version, ...rest } = parsed.data;
   const body: Record<string, unknown> = { ...rest };
   if (body.links !== undefined) body.links = JSON.stringify(body.links);
@@ -241,6 +251,9 @@ tasks.patch("/:id", async (c) => {
     const next = body.status as string;
     if (next === "Submitted") return c.json({ error: "use_submit" }, 400);
     if (!canEditTaskStatus(u, ref, next, assignee)) return c.json({ error: "forbidden" }, 403);
+    // Approving / sending back must go through the review endpoints (comment, notification, history).
+    if (row.status === "Submitted" && next === "Done") return c.json({ error: "use_approve" }, 400);
+    if (row.status === "Submitted" && next === "To do") return c.json({ error: "use_send_back" }, 400);
     // Reopening a Done task assigned by someone else is approver-only.
     if (row.status === "Done" && row.assigned_by_id !== row.assignee_id && !approver) {
       return c.json({ error: "forbidden" }, 403);

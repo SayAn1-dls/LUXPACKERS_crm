@@ -385,3 +385,43 @@ describe("comments", () => {
     expect(await auditActions()).toContain("task_commented");
   });
 });
+
+describe("review loop cannot be bypassed via PATCH", () => {
+  it("PATCH on a Submitted task to Done / To do -> 400 use_approve / use_send_back", async () => {
+    const mgr = await makeUser("manager", OPS);
+    const e = await makeUser("employee", OPS);
+    const t = (await mkTask(mgr, { assigneeId: e.id })).task;
+    await api(e.cookie, "POST", `/api/tasks/${t.id}/submit`, {});
+    const d = await api(mgr.cookie, "PATCH", `/api/tasks/${t.id}`, { version: 2, status: "Done" });
+    expect(d.status).toBe(400);
+    expect(((await d.json()) as any).error).toBe("use_approve");
+    const b = await api(mgr.cookie, "PATCH", `/api/tasks/${t.id}`, { version: 2, status: "To do" });
+    expect(b.status).toBe(400);
+    expect(((await b.json()) as any).error).toBe("use_send_back");
+    const cur = ((await (await api(mgr.cookie, "GET", `/api/tasks/${t.id}`)).json()) as any).task;
+    expect([cur.status, cur.version]).toEqual(["Submitted", 2]);
+  });
+});
+
+describe("task links are http(s) only", () => {
+  it("rejects javascript: and data: links on create and patch", async () => {
+    const e = await makeUser("employee", OPS);
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "not a url"]) {
+      const r = await api(e.cookie, "POST", "/api/tasks", { title: "T", dept: OPS, priority: "Low", links: [bad] });
+      expect(r.status).toBe(400);
+      expect(await r.json()).toEqual({ error: "invalid", field: "links" });
+    }
+    const t = (await mkTask(e)).task;
+    const r = await api(e.cookie, "PATCH", `/api/tasks/${t.id}`, { version: 1, links: ["https://ok.example", "javascript:alert(1)"] });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "invalid", field: "links" });
+  });
+
+  it("accepts http and https links", async () => {
+    const e = await makeUser("employee", OPS);
+    const t = (await mkTask(e, { links: ["http://a.example/x", "https://b.example/y?z=1"] })).task;
+    expect(t.links).toEqual(["http://a.example/x", "https://b.example/y?z=1"]);
+    const r = await api(e.cookie, "PATCH", `/api/tasks/${t.id}`, { version: 1, links: ["https://c.example"] });
+    expect(r.status).toBe(200);
+  });
+});
