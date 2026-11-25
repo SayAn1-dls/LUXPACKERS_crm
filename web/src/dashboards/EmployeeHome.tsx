@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
@@ -63,6 +63,7 @@ export function EmployeeHome() {
   const navigate = useNavigate();
   const [openId, setOpenId] = useState<string | null>(null);
   useTitle("Home");
+  const closeDrawer = useCallback(() => setOpenId(null), []);
 
   const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard") });
   const feed = useQuery({ queryKey: ["notifications"], queryFn: () => api<{ items: Note[] }>("GET", "/notifications") });
@@ -139,7 +140,7 @@ export function EmployeeHome() {
           </div>
         </>
       )}
-      {openId && <TaskDrawer key={openId} taskId={openId} onClose={() => setOpenId(null)} />}
+      {openId && <TaskDrawer key={openId} taskId={openId} onClose={closeDrawer} />}
     </>
   );
 }

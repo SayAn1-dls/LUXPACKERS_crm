@@ -58,12 +58,15 @@ export function TaskDrawer({ taskId, preset, onClose }: Props) {
     setLinksError(false);
   }, [task?.id, task?.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Focus the dialog once on open. The Escape listener reads the latest onClose from a ref so parent re-renders never re-run this.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     box.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
   const perms = useMemo(() => (task && user ? taskPerms(user, task, people) : null), [task, user, people]);
   const dirty = !isNew && !!base && JSON.stringify(draft) !== JSON.stringify(base);
