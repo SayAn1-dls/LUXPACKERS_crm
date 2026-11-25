@@ -193,3 +193,111 @@ describe("notify", () => {
     expect(n.n).toBe(1);
   });
 });
+
+const auditCount = async (action?: string) =>
+  (
+    await env.DB.prepare(action ? "SELECT COUNT(*) AS n FROM audit_log WHERE action = ?" : "SELECT COUNT(*) AS n FROM audit_log")
+      .bind(...(action ? [action] : []))
+      .first<any>()
+  ).n as number;
+
+describe("fix round 1: escalation paths", () => {
+  it("HR cannot create hr or admin accounts", async () => {
+    const hr = await makeUser("hr", "People & Interns");
+    expect((await api(hr.cookie, "POST", "/api/users", newUser({ email: "h@example.com", role: "hr" }))).status).toBe(403);
+    expect((await api(hr.cookie, "POST", "/api/users", newUser({ email: "a@example.com", role: "admin" }))).status).toBe(403);
+  });
+
+  it("manager-role caller is refused everywhere", async () => {
+    const mgr = await makeUser("manager", "Operations");
+    const emp = await makeUser("employee", "Operations");
+    expect((await api(mgr.cookie, "GET", "/api/users")).status).toBe(403);
+    expect((await api(mgr.cookie, "POST", "/api/users", newUser())).status).toBe(403);
+    expect((await api(mgr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "x" })).status).toBe(403);
+    expect((await api(mgr.cookie, "POST", `/api/users/${emp.id}/reset-password`, {})).status).toBe(403);
+  });
+
+  it("employee cannot reset a password; unknown id is 404 for admin", async () => {
+    const emp = await makeUser("employee", "Operations");
+    const other = await makeUser("employee", "Operations");
+    const admin = await makeUser("admin", "Management");
+    expect((await api(emp.cookie, "POST", `/api/users/${other.id}/reset-password`, {})).status).toBe(403);
+    expect((await api(admin.cookie, "POST", `/api/users/nope/reset-password`, {})).status).toBe(404);
+  });
+
+  it("HR cannot re-activate a left manager; admin can", async () => {
+    const hr = await makeUser("hr", "People & Interns");
+    const admin = await makeUser("admin", "Management");
+    const gone = await makeUser("manager", "Operations", { status: "left" });
+    expect((await api(hr.cookie, "PATCH", `/api/users/${gone.id}`, { status: "active" })).status).toBe(403);
+    expect((await api(admin.cookie, "PATCH", `/api/users/${gone.id}`, { status: "active" })).status).toBe(200);
+  });
+
+  it("HR cannot change own dept; can change an employee's dept, not a manager's", async () => {
+    const hr = await makeUser("hr", "People & Interns");
+    const emp = await makeUser("employee", "Operations");
+    const mgr = await makeUser("manager", "Operations");
+    expect((await api(hr.cookie, "PATCH", `/api/users/${hr.id}`, { dept: "Finance" })).status).toBe(403);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${hr.id}`, { managerId: emp.id })).status).toBe(403);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { dept: "Finance" })).status).toBe(200);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { dept: "Finance" })).status).toBe(403);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { managerId: emp.id })).status).toBe(403);
+    const row = await env.DB.prepare("SELECT dept FROM users WHERE id = ?").bind(hr.id).first<any>();
+    expect(row.dept).toBe("People & Interns");
+  });
+
+  it("unchanged values do not trip the checks or write audit", async () => {
+    const hr = await makeUser("hr", "People & Interns");
+    const mgr = await makeUser("manager", "Operations");
+    // same dept/status as current: not a change, so allowed and silent
+    const res = await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { dept: "Operations", status: "active" });
+    expect(res.status).toBe(200);
+    expect(await auditCount("user_updated")).toBe(0);
+  });
+
+  it("role equal to current is a no-op 200 with no audit", async () => {
+    const admin = await makeUser("admin", "Management");
+    const emp = await makeUser("employee", "Operations");
+    expect((await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { role: "employee" })).status).toBe(200);
+    expect(await auditCount()).toBe(0);
+  });
+
+  it("only changed fields are audited", async () => {
+    const hr = await makeUser("hr", "People & Interns");
+    const emp = await makeUser("employee", "Operations");
+    await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Exec" });
+    await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Exec", phone: "123" });
+    const rows = await env.DB.prepare("SELECT detail FROM audit_log WHERE action = 'user_updated' ORDER BY at").all<any>();
+    expect(rows.results.map((r) => JSON.parse(r.detail).fields)).toEqual([["title"], ["phone"]]);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Exec" })).status).toBe(200);
+    expect(await auditCount("user_updated")).toBe(2);
+  });
+
+  it("/api/people hides left users from employees, shows them to hr", async () => {
+    const emp = await makeUser("employee", "Operations");
+    const hr = await makeUser("hr", "People & Interns");
+    const gone = await makeUser("employee", "Operations", { status: "left" });
+    const e = (await (await api(emp.cookie, "GET", "/api/people")).json()) as any;
+    expect(e.people.some((p: any) => p.id === gone.id)).toBe(false);
+    const h = (await (await api(hr.cookie, "GET", "/api/people")).json()) as any;
+    expect(h.people.some((p: any) => p.id === gone.id)).toBe(true);
+  });
+
+  it("create is atomic: a failing notification rolls back the user and audit", async () => {
+    const admin = await makeUser("admin", "Management");
+    await makeUser("hr", "People & Interns");
+    await env.DB.prepare("DROP TRIGGER IF EXISTS boom").run();
+    await env.DB.prepare(
+      "CREATE TRIGGER boom BEFORE INSERT ON notifications BEGIN SELECT RAISE(ABORT, 'boom'); END",
+    ).run();
+    try {
+      const res = await api(admin.cookie, "POST", "/api/users", newUser({ email: "atomic@example.com" }));
+      expect(res.status).toBe(500);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER boom").run();
+    }
+    const u = await env.DB.prepare("SELECT 1 AS x FROM users WHERE email = 'atomic@example.com'").first();
+    expect(u).toBeNull();
+    expect(await auditCount("user_created")).toBe(0);
+  });
+});

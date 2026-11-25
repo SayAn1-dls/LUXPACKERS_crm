@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { DEPT_NAMES, ONBOARDING_STEPS, ROLES } from "../../../shared/schema";
 import type { AppEnv, Role, SessionUser } from "../env";
-import { audit } from "../lib/audit";
+import { auditStmt } from "../lib/audit";
 import { hashPassword } from "../lib/crypto";
-import { notify } from "../lib/notify";
+import { notifyStmts } from "../lib/notify";
 import { canChangeRole, canEditProfile, canManageUser } from "../lib/policy";
-import { destroySessions, requireUser } from "../lib/session";
+import { requireUser } from "../lib/session";
 
 // No 0/O/1/l/I. 24 + 25 + 8 = 57 characters.
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -152,6 +152,9 @@ users.post("/", async (c) => {
       );
     });
   }
+  const hrs = await db.prepare("SELECT id FROM users WHERE role = 'hr' AND status != 'left'").all<{ id: string }>();
+  stmts.push(...notifyStmts(db, hrs.results.map((r) => r.id), "user_created", `New account created: ${b.name}`, "/people"));
+  stmts.push(auditStmt(db, actor, "user_created", "user", id, b.name, { role: b.role, dept: b.dept, status: b.status }));
   try {
     await db.batch(stmts);
   } catch (e) {
@@ -159,18 +162,26 @@ users.post("/", async (c) => {
     throw e;
   }
 
-  const hrs = await db.prepare("SELECT id FROM users WHERE role = 'hr' AND status != 'left'").all<{ id: string }>();
-  await notify(db, hrs.results.map((r) => r.id), "user_created", `New account created: ${b.name}`, "/people");
-  await audit(db, actor, "user_created", "user", id, b.name, { role: b.role, dept: b.dept, status: b.status });
-
-  const row = await db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`).bind(id).first<UserRow>();
-  return c.json({ user: toApi(row!), tempPassword }, 201);
+  const row: UserRow = {
+    id, email: b.email, name: b.name, role: b.role, dept: b.dept, manager_id: b.managerId ?? null,
+    title: b.title ?? null, phone: b.phone ?? null, kind: b.kind, joined_on: b.joinedOn ?? null,
+    status: b.status, created_at: now, updated_at: now,
+  };
+  return c.json({ user: toApi(row), tempPassword }, 201);
 });
 
 const COLUMN: Record<string, string> = {
   name: "name", role: "role", dept: "dept", managerId: "manager_id", title: "title",
   phone: "phone", kind: "kind", joinedOn: "joined_on", status: "status",
 };
+
+const CURRENT: Record<string, (r: UserRow) => unknown> = {
+  name: (r) => r.name, role: (r) => r.role, dept: (r) => r.dept, managerId: (r) => r.manager_id,
+  title: (r) => r.title, phone: (r) => r.phone, kind: (r) => r.kind, joinedOn: (r) => r.joined_on,
+  status: (r) => r.status,
+};
+// Changes to these need canManageUser (admin: anyone; HR: employees only), and are never self-service.
+const MANAGED = new Set(["status", "dept", "managerId"]);
 
 users.patch("/:id", async (c) => {
   const actor = c.var.user!;
@@ -182,38 +193,44 @@ users.patch("/:id", async (c) => {
   const parsed = PatchBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "invalid" }, 400);
   const body = parsed.data as Record<string, unknown>;
+  const supplied = Object.keys(body).filter((k) => body[k] !== undefined);
+  if (supplied.length === 0) return c.json({ error: "invalid" }, 400);
   const self = actor.id === id;
+  const isAdmin = actor.role === "admin";
 
-  const roleChange = body.role !== undefined && body.role !== target.role;
-  if (body.role === target.role) delete body.role;
-  const profileKeys = Object.keys(body).filter((k) => k !== "role" && body[k] !== undefined);
-  if (!roleChange && profileKeys.length === 0) return c.json({ error: "invalid" }, 400);
+  // Only values that actually differ count as changes.
+  const fields = supplied.filter((k) => body[k] !== CURRENT[k](target));
+  if (fields.length === 0) return c.json({ user: toApi(target) });
 
-  if (roleChange && (self || !canChangeRole(actor, target.role, body.role as string))) {
+  if (fields.includes("role") && (self || !canChangeRole(actor, target.role, body.role as string))) {
     return c.json({ error: "forbidden" }, 403);
   }
-  if (profileKeys.length > 0 && !canEditProfile(actor, target.role)) return c.json({ error: "forbidden" }, 403);
-  const disabling = body.status === "left" && target.status !== "left";
-  if (body.status === "left" && (self || !canManageUser(actor, target.role))) {
+  const managed = fields.filter((k) => MANAGED.has(k));
+  if (managed.length > 0 && (!canManageUser(actor, target.role) || (self && !isAdmin))) {
     return c.json({ error: "forbidden" }, 403);
   }
-  if (typeof body.managerId === "string" && !(await managerOk(db, body.managerId, id))) {
+  if (fields.some((k) => k !== "role" && !MANAGED.has(k)) && !canEditProfile(actor, target.role)) {
+    return c.json({ error: "forbidden" }, 403);
+  }
+  const disabling = fields.includes("status") && body.status === "left";
+  if (disabling && self) return c.json({ error: "forbidden" }, 403);
+  if (typeof body.managerId === "string" && fields.includes("managerId") && !(await managerOk(db, body.managerId, id))) {
     return c.json({ error: "invalid_manager" }, 400);
   }
 
-  const fields = Object.keys(body).filter((k) => body[k] !== undefined);
-  const sets = fields.map((k) => `${COLUMN[k]} = ?`);
-  await db
-    .prepare(`UPDATE users SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`)
-    .bind(...fields.map((k) => body[k]), new Date().toISOString(), id)
-    .run();
-
+  const now = new Date().toISOString();
+  const stmts = [
+    db
+      .prepare(`UPDATE users SET ${fields.map((k) => `${COLUMN[k]} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
+      .bind(...fields.map((k) => body[k]), now, id),
+  ];
   if (disabling) {
-    await destroySessions(db, id);
-    await audit(db, actor, "user_disabled", "user", id, target.name);
+    stmts.push(db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id));
+    stmts.push(auditStmt(db, actor, "user_disabled", "user", id, target.name));
   }
   const rest = disabling ? fields.filter((f) => f !== "status") : fields;
-  if (rest.length > 0) await audit(db, actor, "user_updated", "user", id, target.name, { fields: rest });
+  if (rest.length > 0) stmts.push(auditStmt(db, actor, "user_updated", "user", id, target.name, { fields: rest }));
+  await db.batch(stmts);
 
   const row = await db.prepare(`SELECT ${PUBLIC_COLS} FROM users WHERE id = ?`).bind(id).first<UserRow>();
   return c.json({ user: toApi(row!) });
@@ -228,11 +245,12 @@ users.post("/:id/reset-password", async (c) => {
   if (!canManageUser(actor, target.role)) return c.json({ error: "forbidden" }, 403);
   const tempPassword = generateTempPassword();
   const { hash, salt } = await hashPassword(tempPassword);
-  await db
-    .prepare("UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1, updated_at = ? WHERE id = ?")
-    .bind(hash, salt, new Date().toISOString(), id)
-    .run();
-  await destroySessions(db, id);
-  await audit(db, actor, "password_reset", "user", id, target.name);
+  await db.batch([
+    db
+      .prepare("UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1, updated_at = ? WHERE id = ?")
+      .bind(hash, salt, new Date().toISOString(), id),
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
+    auditStmt(db, actor, "password_reset", "user", id, target.name),
+  ]);
   return c.json({ tempPassword });
 });
