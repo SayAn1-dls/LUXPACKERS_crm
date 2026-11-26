@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { useAuth } from "../auth";
@@ -19,8 +19,11 @@ export function Leave() {
   useTitle("Leave");
   const approverTab: { scope: Scope; label: string } | null =
     user?.role === "manager" ? { scope: "team", label: "My team" } : user?.role === "hr" || user?.role === "admin" ? { scope: "all", label: "Everyone" } : null;
-  const [scope, setScope] = useState<Scope>("mine");
-  const current = approverTab && scope === approverTab.scope ? scope : "mine";
+  const [params, setParams] = useSearchParams();
+  // ?tab= comes from notification links; a tab this role can't use falls back to "My leave".
+  const asked = params.get("tab");
+  const current: Scope = approverTab && asked === approverTab.scope ? approverTab.scope : "mine";
+  const setScope = (s: Scope) => setParams((p) => { const n = new URLSearchParams(p); n.set("tab", s); return n; }, { replace: true });
   const { busy, run } = useLeaveActions();
 
   const q = useQuery({

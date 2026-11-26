@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { pollWhileVisible } from "../lib/polling";
 import { useAuth } from "../auth";
 import { Figure, Figures } from "../components/Figure";
 import { PendingLeave } from "../components/PendingLeave";
@@ -25,7 +26,7 @@ export function ManagerHome() {
   useTitle("Home");
   const closeDrawer = useCallback(() => { setOpenId(null); setCreating(false); }, []);
 
-  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard") });
+  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard"), refetchInterval: pollWhileVisible });
   const d = dash.data;
   const late = d?.workload.reduce((s, w) => s + w.late, 0) ?? 0;
   const open = d?.workload.reduce((s, w) => s + w.open, 0) ?? 0;

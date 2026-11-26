@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { pollWhileVisible } from "../lib/polling";
 import { safeInternal } from "../lib/safeInternal";
 
 interface Item { id: string; kind: string; title: string; link: string | null; readAt: string | null; createdAt: string }
@@ -27,7 +28,7 @@ export function NotificationBell() {
   const feed = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api<Feed>("GET", "/notifications"),
-    refetchInterval: () => (document.visibilityState === "visible" ? 60_000 : false),
+    refetchInterval: pollWhileVisible,
   });
   const markRead = useMutation({
     mutationFn: (ids?: string[]) => api("POST", "/notifications/read", ids ? { ids } : {}),

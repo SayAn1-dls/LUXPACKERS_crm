@@ -90,7 +90,8 @@ describe("POST /api/leave", () => {
     expect(res.status).toBe(201);
     const { request } = (await res.json()) as any;
     expect(request).toMatchObject({ days: 2, status: "Pending", kind: "Casual", halfDay: false, userId: emp.id });
-    for (const u of [mgr, hr, hr2]) expect(await notifs(u.id)).toEqual([{ kind: "leave_requested", link: "/leave" }]);
+    expect(await notifs(mgr.id)).toEqual([{ kind: "leave_requested", link: "/leave?tab=team" }]);
+    for (const u of [hr, hr2]) expect(await notifs(u.id)).toEqual([{ kind: "leave_requested", link: "/leave?tab=all" }]);
     expect(await notifs(emp.id)).toEqual([]);
     expect(await auditActions()).toContain("leave_requested");
   });

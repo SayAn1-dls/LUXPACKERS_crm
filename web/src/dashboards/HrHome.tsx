@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { pollWhileVisible } from "../lib/polling";
 import { useAuth } from "../auth";
 import { AddPersonDrawer } from "../components/AddPersonDrawer";
 import { Figure, Figures } from "../components/Figure";
@@ -24,7 +25,7 @@ export function HrHome() {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   useTitle("Home");
-  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard") });
+  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard"), refetchInterval: pollWhileVisible });
   const d = dash.data;
 
   return (

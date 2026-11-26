@@ -143,7 +143,9 @@ leave.post("/", async (c) => {
     await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'manager' AND status != 'left'").bind(u.managerId ?? "").first<{ id: string }>()
   )?.id;
   const hrIds = (await db.prepare("SELECT id FROM users WHERE role = 'hr' AND status != 'left'").all<{ id: string }>()).results.map((r) => r.id);
-  const who = [...(managerId ? [managerId] : []), ...hrIds].filter((id) => id !== u.id);
+  // Approvers land on the tab where they decide; the requester's own decision links stay on "/leave".
+  const managerWho = managerId && managerId !== u.id ? [managerId] : [];
+  const hrWho = hrIds.filter((id) => id !== u.id && id !== managerId);
 
   const id = crypto.randomUUID();
   const title = `${u.name} requested ${b.kind} leave (${b.start === b.end ? b.start : `${b.start} to ${b.end}`})`;
@@ -154,7 +156,8 @@ leave.post("/", async (c) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
       )
       .bind(id, u.id, b.kind, b.start, b.end, days, b.halfDay ? 1 : 0, b.reason ?? null),
-    ...notifyStmts(db, who, "leave_requested", title, link),
+    ...notifyStmts(db, managerWho, "leave_requested", title, `${link}?tab=team`),
+    ...notifyStmts(db, hrWho, "leave_requested", title, `${link}?tab=all`),
     auditStmt(db, u, "leave_requested", "leave", id, title, { kind: b.kind, start: b.start, end: b.end, days }),
   ]);
   return c.json({ request: toApi((await load(db, id))!) }, 201);

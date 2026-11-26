@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { pollWhileVisible } from "../lib/polling";
 import { useAuth } from "../auth";
 import { Figure, Figures } from "../components/Figure";
 import { timeAgo } from "../components/NotificationBell";
@@ -65,7 +66,7 @@ export function EmployeeHome() {
   useTitle("Home");
   const closeDrawer = useCallback(() => setOpenId(null), []);
 
-  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard") });
+  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard"), refetchInterval: pollWhileVisible });
   const feed = useQuery({ queryKey: ["notifications"], queryFn: () => api<{ items: Note[] }>("GET", "/notifications") });
   const d = dash.data;
   const dueNow = d ? [...d.overdue, ...d.today] : [];
