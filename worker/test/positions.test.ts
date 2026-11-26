@@ -443,7 +443,11 @@ describe("no side effects when the write does not happen", () => {
       api(a.cookie, "PATCH", `/api/users/${b.id}`, { status: "left" }),
       api(b.cookie, "PATCH", `/api/users/${a.id}`, { status: "left" }),
     ]);
-    expect([ra.status, rb.status].sort()).toEqual([200, 409]);
+    // Exactly one wins. The loser either loses the last-admin guard (409) or, if the winner's
+    // write landed first, was already signed out by being disabled (401). Both are safe.
+    const statuses = [ra.status, rb.status].sort();
+    expect(statuses[0]).toBe(200);
+    expect([401, 409]).toContain(statuses[1]);
     const n = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM users u JOIN positions p ON p.id = u.position_id WHERE p.is_admin = 1 AND u.status != 'left'",
     ).first<any>();
