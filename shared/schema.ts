@@ -163,7 +163,7 @@ export const REGISTERS: RegisterDef[] = [
     titleKey: "entry", statusKey: "status",
     statuses: [{ v: "Pending", tone: "wait" }, { v: "Paid", tone: "done" }, { v: "Overdue", tone: "alert" }, { v: "Cancelled", tone: "muted" }],
     columns: ["date", "entry", "flow", "category", "party", "amount", "status"],
-    filters: ["flow", "category"],
+    filters: ["flow", "category", "owner_id"],
     fields: [
       { key: "entry", label: "Description", type: "text", required: true, wide: true },
       { key: "flow", label: "Money", type: "select", options: ["In", "Out"], required: true },
@@ -183,7 +183,7 @@ export const REGISTERS: RegisterDef[] = [
     titleKey: "name", statusKey: "status",
     statuses: [{ v: "Active", tone: "done" }, { v: "Proposed", tone: "wait" }, { v: "On hold", tone: "muted" }],
     columns: ["name", "kind", "destination", "contact", "rating", "owner_id", "status"],
-    filters: ["kind", "destination"],
+    filters: ["kind", "destination", "owner_id"],
     fields: [
       { key: "name", label: "Partner name", type: "text", required: true, wide: true },
       { key: "kind", label: "Type", type: "select", options: ["Hotel", "Ground partner", "Transport", "Activity", "Visa & flights", "Other"] },

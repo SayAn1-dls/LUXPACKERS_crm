@@ -29,7 +29,12 @@ async function needsOwner(db: D1Database) {
   const byCollection = new Map(recs.results.map((r) => [r.collection, r.n]));
   return {
     tasks: tasks!.n,
-    records: REGISTERS.map((r) => ({ id: r.id, name: r.name, count: byCollection.get(r.id) ?? 0 })),
+    // Only registers that have an owner field can ever be given an owner (the Access register has none).
+    records: REGISTERS.filter((r) => r.fields.some((f) => f.key === "owner_id")).map((r) => ({
+      id: r.id,
+      name: r.name,
+      count: byCollection.get(r.id) ?? 0,
+    })),
   };
 }
 

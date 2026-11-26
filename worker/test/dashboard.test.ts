@@ -281,6 +281,15 @@ describe("admin dashboard", () => {
     expect(by.bookings.count).toBe(0);
   });
 
+  it("needsOwner leaves out registers that have no owner field", async () => {
+    const admin = await makeUser("admin", "Management");
+    await seedRecord("access", "Website hosting", { status: "Given" });
+    const d = (await get(admin)).needsOwner;
+    const ids = d.records.map((r: any) => r.id);
+    expect(ids).not.toContain("access");
+    expect(ids).toEqual(expect.arrayContaining(["leads", "bookings", "trips", "finance", "partners", "content"]));
+  });
+
   it("non-admin roles never get admin keys even with data present", async () => {
     const hr = await makeUser("hr", "People & Interns");
     expect(await get(hr)).not.toHaveProperty("latest");
