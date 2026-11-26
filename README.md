@@ -1,88 +1,157 @@
 # Luxpackers CRM
 
-The Luxpackers operations desk: one place for every task, enquiry, booking, trip, payment, partner, post, team member and login, for every department.
+The Luxpackers operations desk: one place for every task, enquiry, booking, trip, payment, partner, post and team member, for every department.
 
-It is a plain website, so it runs on GitHub Pages for free. The data is kept in one shared Google Sheet so the whole team sees the same records.
+Everyone signs in with their own email and password, and sees a home page made for their job: Admin, Manager, HR or Employee. It runs on Cloudflare's free plan (a Worker for the website and a D1 database for the records), so there is no server to look after. A **Worker** is a small program Cloudflare runs for you whenever someone opens the site; **D1** is Cloudflare's hosted database; **migrations** are the numbered files in `worker/migrations` that create or change the database tables, applied once, in order.
 
 ---
 
-## 1. Put the website online (GitHub Pages)
+## Who sees what
 
-1. Open the repository on GitHub → **Settings** → **Pages**.
-2. Under **Build and deployment**, choose **Deploy from a branch**, branch **main**, folder **/ (root)**, then **Save**.
-3. After a minute or two the address appears at the top of that page, for example
-   `https://sayan1-dls.github.io/LUXPACKERS_crm/`
+| Role | Home page | Can see | Can do |
+|---|---|---|---|
+| **Employee** | **My work**: due today, overdue, this week, tasks sent back, leave balance, notifications | Own tasks, tasks they gave out, the registers of their own department | Update own tasks and submit them, comment, create tasks for themselves, apply for leave, edit records in their department's registers |
+| **Manager** | **My team**: tasks waiting for review, workload per person, overdue by person, leave requests from reports | Everything an employee sees, plus all tasks in their department and their direct reports' tasks | Assign tasks within their department, approve or send back submitted work, reassign, approve their reports' leave, delete records (to Trash) |
+| **HR** | **People**: new joiners and onboarding, all leave requests, people directory, interns ending soon | The whole people directory, all leave, onboarding, own tasks | Add employee accounts (employees only), edit people's profiles, approve any leave, give onboarding tasks to anyone |
+| **Admin** | **Company overview**: what needs attention, the next 7 days, every department | Everything | Everything: add or disable users with any role, change roles, delete and restore records, import data, settings, audit log |
 
-Until step 2 below is done, the CRM saves on each computer separately. Sign in with:
+Good to know:
 
-| Who | Team code |
-|---|---|
-| Everyone | `luxpackers` |
-| Administrators | `luxadmin` |
+- A task you give to yourself can go straight to Done. A task someone else gave you goes to **Submitted**, and only the person who gave it, the department's manager or an admin can mark it Done or send it back with a note.
+- The Finance ledger is for the Finance department and admins only. The Access register is for the Technology department and admins only.
+- Everyone sees a colleague's name, role, department, phone and email. Only HR and admins see joining dates, notes and status changes.
+- The menu on the left shows only what your role can open. **How to use** inside the CRM explains the day-to-day steps for everyone.
 
-Change these in `config.js` (`localTeamCode`, `localAdminCode`).
+---
 
-## 2. Connect the shared Google Sheet (do this once, about 10 minutes)
+## Run it on your computer
 
-1. In Google Drive, create a new Google Sheet called **Luxpackers CRM data**.
-2. In that sheet open **Extensions → Apps Script**.
-3. Delete what is there, paste everything from `google-apps-script/Code.gs`, and press **Save**.
-4. Set the sign-in codes: click **Project Settings** (gear icon) → **Script properties** → **Add script property**:
-   - `TEAM_CODE` → a code for the whole team
-   - `ADMIN_CODE` → a different code for administrators only
+You need [Node.js](https://nodejs.org) installed. Open a terminal in this folder and run these one at a time.
 
-   Choose codes nobody can guess. These replace the codes in the table above.
-5. Click **Deploy → New deployment** → gear icon → **Web app**.
-   - Description: `Luxpackers CRM`
-   - Execute as: **Me**
-   - Who has access: **Anyone**
-   Press **Deploy**, allow the permissions Google asks for, and copy the **Web app URL** (it ends in `/exec`).
-6. Open `config.js` in this repository, paste that address between the quotes of `sheetApiUrl`, and commit.
-7. Open the CRM, sign in with the **admin** code, and press **Load starting records** on the Overview page.
-
-The Google Sheet now has two tabs: **Records** (the data — do not edit the last column by hand) and **Activity** (a log of every change, who made it and when).
-
-> If you later change `Code.gs`, use **Deploy → Manage deployments → Edit → New version** so the address stays the same.
-
-## 3. Add the team
-
-Open **Team** in the CRM and replace each role (CEO, CFO, Content intern…) with the person's real name. Their tasks move to the new name automatically. Then give each person the website address and the team code.
-
-## How the CRM is organised
-
-| Section | What it holds |
-|---|---|
-| Overview | What needs attention, what is due this week, latest changes, every department at a glance |
-| Departments | Management, Sales & Reservations, Operations, Trips & Content, Marketing, Finance, Technology, People & Interns — each with its own tasks and registers |
-| Tasks | Every job, with owner, due date, priority, status and links |
-| Enquiries | Travellers from first message to confirmation, with follow-up dates and quote values |
-| Bookings | Confirmed guests, money received, balance and trip status |
-| Trips | Each itinerary's steps from draft to live on the website |
-| Finance ledger | Money in and out, pending and overdue |
-| Partners | Hotels, ground partners, transport and activities |
-| Content calendar | Reels, posts and stories by date |
-| Team | Everyone at Luxpackers; feeds every Owner list |
-| Access register | Who holds which login — **never** passwords |
-
-Task statuses: **To do**, **In progress**, **To be given** (waiting on someone), **Not done** (late or blocked), **Done**.
-
-Only administrators can delete records. **How to use** inside the CRM explains everything for non-technical colleagues.
-
-## Files
-
-```
-index.html                    the page
-config.js                     settings: company name, Google Sheet address, sign-in codes
-assets/styles.css             the look
-assets/app.js                 how the CRM works
-assets/schema.js              departments, registers, fields and statuses
-assets/seed.js                starting records
-assets/store.js               saving to this computer or to the Google Sheet
-google-apps-script/Code.gs    the Google Sheet connection
+```bash
+npm install
 ```
 
-To add a field or a status, edit `assets/schema.js`. To change a department's name or lead, edit the list at the top of the same file.
+```bash
+npm run db:migrate:local
+```
+
+```bash
+npm run dev
+```
+
+Open the address it prints (usually `http://localhost:5173`).
+
+Run `db:migrate:local` **before** `dev` on a fresh copy. It creates the empty database on your computer, and the site cannot start properly without it. You only need to repeat it when new files appear in `worker/migrations`.
+
+The very first visit goes to a **setup** page. Create the first administrator there (name, email, password). That page only works once; after that everyone signs in normally.
+
+---
+
+## Add your team
+
+1. Sign in as the admin and open **Users**.
+2. Press add, fill in name, email, role and department, and save.
+3. A **temporary password** is shown once. Copy it and send it to the person privately. It is not shown again. At first sign-in they are asked to choose their own.
+4. HR can add people too, but only as **Employees**. Only an admin can create managers, HR or other admins, or change someone's role.
+
+Add the real people **before** importing the old data, so old owner names can be matched to them.
+
+---
+
+## Bring over the old data
+
+1. In the **old** CRM, open **Settings → Download backup**. Keep the file safe.
+2. In the new CRM, sign in as admin and open **Import**.
+3. Choose the backup file. Nothing is saved yet. You see a preview with the number of records of each kind.
+4. The old CRM used names like "CFO" or "Ops intern" as owners. The preview lists each one with a drop-down. Pick the real person for each. Any you leave unmatched are imported as **unassigned**. Admins see them in the **Needs an owner** section on their home page, which links to the open tasks with no one assigned (Tasks, All tab, owner "No owner") and, for each register, to the records with no owner (owner filter "No owner").
+5. Press **Import**.
+
+Importing never creates logins; people must already have accounts (see above).
+
+> **Importing again overwrites changes made here** to the same records. Each record is matched by its old id, so a second import updates records instead of duplicating them, but it also puts back the old values. Import once at cut-over, then work only in the new CRM.
+
+Starting from scratch instead? On the same page, **Load starting records** adds the open tasks, the trips, the team roles, the access register and the partner hotels so you can see how everything fits.
+
+---
+
+## Move off the Google Sheet
+
+Do these in order, on a quiet day.
+
+1. **Freeze edits.** Tell everyone to stop using the old CRM.
+2. **Final backup.** In the old CRM, download a fresh backup (Settings → Download backup).
+3. **Import.** In the new CRM, import that file as described above, matching owners to real people.
+4. **Check the counts.** Compare the numbers on the import preview with the old CRM (tasks, enquiries, bookings and so on). Open a few records you know well.
+5. **Archive the old setup.** In Google Apps Script, archive the old deployment (Deploy → Manage deployments → Archive), and keep the Google Sheet as a read-only record.
+6. **Tidy up.** Once everyone is working in the new CRM and you are happy, the `legacy/` folder in this repository (the old website and Apps Script) can be deleted. Keep it until then.
+
+---
+
+## Go live on Cloudflare (free plan)
+
+You need a free [Cloudflare account](https://dash.cloudflare.com/sign-up). Run these one at a time.
+
+Sign in to Cloudflare (a browser window opens):
+
+```bash
+npx wrangler login
+```
+
+Create the live database:
+
+```bash
+npx wrangler d1 create luxcrm
+```
+
+It prints a `database_id`. Open `wrangler.jsonc` and replace `local-dev` with that id:
+
+```jsonc
+"database_id": "paste-the-id-here"
+```
+
+Create the tables in the live database:
+
+```bash
+npx wrangler d1 migrations apply luxcrm --remote
+```
+
+Build and publish the site:
+
+```bash
+npm run deploy
+```
+
+When it finishes it prints a `workers.dev` address. Open the address and finish setup straight away: until you do, anyone who finds the address could create the first admin. Then you are live. Share the address with the team.
+
+**Check sign-in speed on the live site.** Passwords are checked with a deliberately slow calculation, and the free plan gives each request a small CPU allowance. Time a real sign-in once after the first deploy. If Cloudflare reports CPU-limit errors (in the dashboard under the Worker's Logs), either lower the iteration count in `worker/src/lib/crypto.ts` (existing passwords keep working because every hash records the iteration count it was made with; new and changed passwords use the new count) or move to Workers Paid.
+
+**Later updates:** run `npm run deploy` again. If a new file has appeared in `worker/migrations`, run the `migrations apply luxcrm --remote` command first. Your records are never touched by a deploy.
+
+---
+
+## What is in this folder
+
+```
+worker/src/          the server: sign-in, permissions, records, tasks, leave, import
+worker/migrations/   the database tables (applied in order)
+worker/test/         automatic checks for the server
+web/src/             the website people see: pages, dashboards, styles
+shared/              lists used by both sides (departments, registers, statuses)
+docs/                the design notes
+legacy/              the old Google Sheet version, kept until cut-over is finished
+wrangler.jsonc       Cloudflare settings (name, database)
+```
+
+To check everything still works after a change, run `npm test`.
+
+---
 
 ## A note on security
 
-The team code keeps casual visitors out, but this is not bank-grade security. Never store passwords, OTPs, card numbers or passport scans in the CRM. Change the codes in Script properties whenever someone leaves the company.
+- Passwords are never stored as typed; only a scrambled (hashed) version is kept.
+- Sign-in lasts 14 days and is kept in a secure cookie that scripts on the page cannot read.
+- The server checks permissions on **every** request, so hiding a button is never the only protection.
+- After 5 wrong passwords for an email within 15 minutes, sign-in for that email is blocked until the oldest of those tries is 15 minutes old.
+- **Never store passwords, OTPs, card numbers or passport scans in the CRM.** The Access register records only who holds a login and where it is kept.
+- When someone leaves, press **Disable** next to their name on the **Users** page. They are signed out immediately and cannot sign in again.

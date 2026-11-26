@@ -1,0 +1,19 @@
+{
+  "name": "luxpackers-crm",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "luxcrm",
+      "database_id": "local-dev",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  }
+}

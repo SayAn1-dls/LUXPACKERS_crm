@@ -1,0 +1,252 @@
+import { describe, expect, it } from "vitest";
+import type { Role, SessionUser } from "../src/env";
+import {
+  canApproveTask, canAssignTo, canChangeRole, canEditProfile, canDecideLeave, canDeleteRecord, canEditTaskStatus,
+  canManageUser, canReadRegister, canSeePeoplePrivate, canSeeTask, canWriteRegister,
+  type AssigneeRef, type TaskRef,
+} from "../src/lib/policy";
+
+const ROLES: Role[] = ["admin", "manager", "hr", "employee"];
+const mk = (role: Role, dept: string, id = `${role}-${dept}`, managerId: string | null = null): SessionUser => ({
+  id, name: id, email: `${id}@x.test`, role, dept, managerId, mustChangePassword: false,
+});
+
+const SALES = "Sales & Reservations", OPS = "Operations", FIN = "Finance", TECH = "Technology", MGMT = "Management";
+
+describe("register access matrix", () => {
+  const registers: Record<string, string[]> = {
+    finance: [FIN],
+    access: [TECH],
+    bookings: [SALES, OPS, FIN],
+  };
+  const depts = [SALES, OPS, FIN, TECH, MGMT, "People & Interns", "Marketing", "Trips & Content"];
+  for (const [reg, allowed] of Object.entries(registers)) {
+    for (const role of ROLES) {
+      for (const dept of depts) {
+        const expected = role === "admin" || allowed.includes(dept);
+        it(`${role} in ${dept} ${expected ? "can" : "cannot"} read/write ${reg}`, () => {
+          const u = mk(role, dept);
+          expect(canReadRegister(u, reg)).toBe(expected);
+          expect(canWriteRegister(u, reg)).toBe(expected);
+        });
+        const delExpected = role === "admin" || (role === "manager" && allowed.includes(dept));
+        it(`${role} in ${dept} ${delExpected ? "can" : "cannot"} delete in ${reg}`, () => {
+          expect(canDeleteRecord(mk(role, dept), reg)).toBe(delExpected);
+        });
+      }
+    }
+  }
+  it("unknown register ids are denied for everyone, admin included", () => {
+    for (const role of ROLES) {
+      const u = mk(role, FIN);
+      for (const id of ["nope", "", "Finance", "__proto__", "tasks"]) {
+        expect(canReadRegister(u, id)).toBe(false);
+        expect(canWriteRegister(u, id)).toBe(false);
+        expect(canDeleteRecord(u, id)).toBe(false);
+      }
+    }
+  });
+});
+
+describe("canAssignTo", () => {
+  const target = (id: string, dept: string, managerId: string | null = null) => ({ id, dept, managerId });
+  it("admin and hr assign to anyone", () => {
+    expect(canAssignTo(mk("admin", MGMT), target("z", TECH))).toBe(true);
+    expect(canAssignTo(mk("hr", "People & Interns"), target("z", TECH))).toBe(true);
+  });
+  it("manager: same dept or direct report only", () => {
+    const m = mk("manager", SALES, "m1");
+    expect(canAssignTo(m, target("a", SALES))).toBe(true);
+    expect(canAssignTo(m, target("b", FIN, "m1"))).toBe(true);
+    expect(canAssignTo(m, target("c", FIN, "other"))).toBe(false);
+    expect(canAssignTo(m, target("d", FIN))).toBe(false);
+  });
+  it("employee: only themselves", () => {
+    const e = mk("employee", SALES, "e1");
+    expect(canAssignTo(e, target("e1", SALES))).toBe(true);
+    expect(canAssignTo(e, target("e2", SALES))).toBe(false);
+    expect(canAssignTo(e, target("e3", FIN, "e1"))).toBe(false);
+  });
+  it("manager and hr can always assign to themselves", () => {
+    expect(canAssignTo(mk("manager", SALES, "m1"), target("m1", FIN))).toBe(true);
+  });
+});
+
+describe("canSeeTask", () => {
+  const t: TaskRef = { assigneeId: "emp", assignedById: "boss", dept: SALES };
+  const assignee: AssigneeRef = { managerId: "mgr-other" };
+  it.each([
+    ["admin", mk("admin", MGMT), true],
+    ["assignee", mk("employee", FIN, "emp"), true],
+    ["assigner", mk("employee", FIN, "boss"), true],
+    ["manager of task dept", mk("manager", SALES, "m1"), true],
+    ["manager of assignee", mk("manager", FIN, "mgr-other"), true],
+    ["manager of other dept", mk("manager", FIN, "m2"), false],
+    ["unrelated employee in same dept", mk("employee", SALES, "x"), false],
+    ["hr, unrelated", mk("hr", "People & Interns", "h"), false],
+    ["employee whose managerId matches (not a manager)", mk("employee", FIN, "mgr-other"), false],
+  ])("%s -> %s", (_n, u, exp) => {
+    expect(canSeeTask(u, t, assignee)).toBe(exp);
+  });
+  it("works with no assignee info and unassigned tasks", () => {
+    expect(canSeeTask(mk("manager", FIN, "mgr-other"), t)).toBe(false);
+    const un: TaskRef = { assigneeId: null, assignedById: "boss", dept: SALES };
+    expect(canSeeTask(mk("employee", SALES, "x"), un)).toBe(false);
+    expect(canSeeTask(mk("employee", SALES, "boss"), un)).toBe(true);
+    expect(canSeeTask(mk("manager", SALES, "m"), un)).toBe(true);
+  });
+});
+
+describe("canApproveTask", () => {
+  const t: TaskRef = { assigneeId: "emp", assignedById: "boss", dept: SALES };
+  const assignee: AssigneeRef = { managerId: "mgr-other" };
+  it.each([
+    ["admin", mk("admin", MGMT), true],
+    ["assigner", mk("employee", FIN, "boss"), true],
+    ["manager of dept", mk("manager", SALES, "m1"), true],
+    ["manager of assignee", mk("manager", FIN, "mgr-other"), true],
+    ["manager elsewhere", mk("manager", FIN, "m2"), false],
+    ["assignee employee", mk("employee", SALES, "emp"), false],
+    ["unrelated employee", mk("employee", SALES, "x"), false],
+    ["hr", mk("hr", "People & Interns", "h"), false],
+  ])("%s -> %s", (_n, u, exp) => {
+    expect(canApproveTask(u, t, assignee)).toBe(exp);
+  });
+  it("manager who is the assignee cannot approve their own task", () => {
+    const own: TaskRef = { assigneeId: "m1", assignedById: "boss", dept: SALES };
+    expect(canApproveTask(mk("manager", SALES, "m1"), own, { managerId: null })).toBe(false);
+  });
+  it("admin who is the assignee cannot approve; assigner==assignee cannot approve", () => {
+    expect(canApproveTask(mk("admin", MGMT, "a1"), { assigneeId: "a1", assignedById: "boss", dept: SALES }, { managerId: null })).toBe(false);
+    expect(canApproveTask(mk("employee", SALES, "s"), { assigneeId: "s", assignedById: "s", dept: SALES }, { managerId: null })).toBe(false);
+  });
+  it("missing assignee info does not grant manager-of-assignee", () => {
+    expect(canApproveTask(mk("manager", FIN, "mgr-other"), t, null)).toBe(false);
+  });
+});
+
+describe("canEditTaskStatus", () => {
+  const assigned: TaskRef = { assigneeId: "emp", assignedById: "boss", dept: SALES };
+  const selfOwned: TaskRef = { assigneeId: "emp", assignedById: "emp", dept: SALES };
+  const emp = mk("employee", SALES, "emp");
+  const nonDone = ["To do", "In progress", "Waiting", "Blocked", "Submitted"];
+  it("assignee may set non-Done statuses on an assigned task", () => {
+    for (const s of nonDone) expect(canEditTaskStatus(emp, assigned, s)).toBe(true);
+  });
+  it("assignee may not set Done on a task someone else assigned", () => {
+    expect(canEditTaskStatus(emp, assigned, "Done")).toBe(false);
+  });
+  it("assignee may set Done on a self-assigned task", () => {
+    expect(canEditTaskStatus(emp, selfOwned, "Done")).toBe(true);
+  });
+  it("approvers may set any status", () => {
+    for (const s of [...nonDone, "Done"]) {
+      expect(canEditTaskStatus(mk("employee", FIN, "boss"), assigned, s, { managerId: null })).toBe(true);
+      expect(canEditTaskStatus(mk("admin", MGMT), assigned, s, { managerId: null })).toBe(true);
+      expect(canEditTaskStatus(mk("manager", SALES, "m1"), assigned, s, { managerId: null })).toBe(true);
+    }
+  });
+  it("manager-of-assignee approves only when assignee info is passed", () => {
+    const m = mk("manager", FIN, "mgr-other");
+    expect(canEditTaskStatus(m, assigned, "Done")).toBe(false);
+    expect(canEditTaskStatus(m, assigned, "Done", { managerId: "mgr-other" })).toBe(true);
+  });
+  it("manager who is the assignee follows the assignee rule, not approver", () => {
+    const m = mk("manager", SALES, "m1");
+    const t: TaskRef = { assigneeId: "m1", assignedById: "boss", dept: SALES };
+    expect(canEditTaskStatus(m, t, "Submitted", { managerId: null })).toBe(true);
+    expect(canEditTaskStatus(m, t, "Done", { managerId: null })).toBe(false);
+  });
+  it("others cannot edit; unknown statuses denied for everyone", () => {
+    expect(canEditTaskStatus(mk("employee", SALES, "x"), assigned, "In progress")).toBe(false);
+    expect(canEditTaskStatus(mk("hr", "People & Interns"), assigned, "In progress")).toBe(false);
+    for (const s of ["", "done", "Cancelled", "DONE "]) {
+      expect(canEditTaskStatus(emp, selfOwned, s)).toBe(false);
+      expect(canEditTaskStatus(mk("admin", MGMT), assigned, s)).toBe(false);
+    }
+  });
+  it("unassigned task: only approvers", () => {
+    const un: TaskRef = { assigneeId: null, assignedById: "boss", dept: SALES };
+    expect(canEditTaskStatus(emp, un, "In progress")).toBe(false);
+    expect(canEditTaskStatus(mk("employee", SALES, "boss"), un, "Done")).toBe(true);
+  });
+});
+
+describe("canManageUser", () => {
+  it.each([
+    ["admin", "admin", true], ["admin", "manager", true], ["admin", "hr", true], ["admin", "employee", true],
+    ["hr", "employee", true], ["hr", "hr", false], ["hr", "manager", false], ["hr", "admin", false],
+    ["manager", "employee", false], ["employee", "employee", false],
+  ] as const)("%s manages %s -> %s", (r, target, exp) => {
+    expect(canManageUser(mk(r, SALES), target)).toBe(exp);
+  });
+  it("unknown target role denied", () => {
+    expect(canManageUser(mk("admin", MGMT), "root" as Role)).toBe(false);
+    expect(canManageUser(mk("hr", SALES), "" as Role)).toBe(false);
+  });
+});
+
+describe("canDecideLeave", () => {
+  const req = { id: "r", managerId: "mgr" };
+  it.each([
+    ["admin", mk("admin", MGMT, "a"), true],
+    ["hr", mk("hr", SALES, "h"), true],
+    ["requester's manager", mk("manager", FIN, "mgr"), true],
+    ["other manager", mk("manager", SALES, "m2"), false],
+    ["employee", mk("employee", SALES, "e"), false],
+  ])("%s -> %s", (_n, u, exp) => expect(canDecideLeave(u, req)).toBe(exp));
+  it("nobody decides their own leave", () => {
+    for (const role of ROLES) {
+      expect(canDecideLeave(mk(role, SALES, "r"), { id: "r", managerId: "r" })).toBe(false);
+      expect(canDecideLeave(mk(role, SALES, "r"), { id: "r", managerId: null })).toBe(false);
+    }
+  });
+  it("no manager: only hr or admin", () => {
+    const none = { id: "r", managerId: null };
+    expect(canDecideLeave(mk("manager", SALES, "m"), none)).toBe(false);
+    expect(canDecideLeave(mk("hr", SALES, "h"), none)).toBe(true);
+    expect(canDecideLeave(mk("admin", SALES, "a"), none)).toBe(true);
+  });
+});
+
+describe("canSeePeoplePrivate", () => {
+  it.each([["admin", true], ["hr", true], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
+    expect(canSeePeoplePrivate(mk(r, SALES))).toBe(exp);
+  });
+});
+
+describe("canDecideLeave role check", () => {
+  const req = { id: "r", managerId: "mgr" };
+  it("employee who is someone's managerId cannot decide", () => {
+    expect(canDecideLeave(mk("employee", SALES, "mgr"), req)).toBe(false);
+  });
+  it("manager with that id can", () => {
+    expect(canDecideLeave(mk("manager", SALES, "mgr"), req)).toBe(true);
+  });
+});
+
+describe("canChangeRole", () => {
+  it.each([["admin", true], ["hr", false], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
+    expect(canChangeRole(mk(r, SALES), "employee", "manager")).toBe(exp);
+  });
+  it("hr cannot escalate or demote", () => {
+    expect(canChangeRole(mk("hr", SALES), "employee", "admin")).toBe(false);
+    expect(canChangeRole(mk("hr", SALES), "manager", "employee")).toBe(false);
+  });
+  it("unknown roles denied, even for admin", () => {
+    const a = mk("admin", MGMT);
+    expect(canChangeRole(a, "root", "employee")).toBe(false);
+    expect(canChangeRole(a, "employee", "root")).toBe(false);
+    expect(canChangeRole(a, "", "")).toBe(false);
+  });
+});
+
+describe("canEditProfile", () => {
+  it.each([["admin", true], ["hr", true], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
+    for (const target of ROLES) expect(canEditProfile(mk(r, SALES), target)).toBe(exp);
+  });
+  it("unknown target role denied", () => {
+    expect(canEditProfile(mk("admin", MGMT), "root")).toBe(false);
+    expect(canEditProfile(mk("hr", SALES), "")).toBe(false);
+  });
+});
