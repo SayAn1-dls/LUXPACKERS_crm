@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Perms, Position } from "../../../shared/schema";
 import type { AppEnv } from "../env";
-import { auditStmt } from "../lib/audit";
+import { auditStmt, auditStmtWhen } from "../lib/audit";
 import { canManagePositions } from "../lib/policy";
 import { BUILT_IN, PermsSchema, parsePerms, roleLabel } from "../lib/positions";
 import { requireUser } from "../lib/session";
@@ -110,7 +110,8 @@ positions.delete("/:id", async (c) => {
   if (row.members > 0) return c.json({ error: "in_use", members: row.members }, 409);
   const res = await db.batch([
     db.prepare("DELETE FROM positions WHERE id = ? AND NOT EXISTS (SELECT 1 FROM users WHERE position_id = ?)").bind(row.id, row.id),
-    auditStmt(db, c.var.user!, "position_deleted", "position", row.id, row.name),
+    // Only audited if the DELETE above really removed the row.
+    auditStmtWhen(db, { sql: "NOT EXISTS (SELECT 1 FROM positions WHERE id = ?)", args: [row.id] }, c.var.user!, "position_deleted", "position", row.id, row.name),
   ]);
   if (res[0].meta.changes === 0) return c.json({ error: "in_use" }, 409);
   return c.json({ ok: true });

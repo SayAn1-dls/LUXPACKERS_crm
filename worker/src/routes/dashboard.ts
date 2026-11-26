@@ -60,21 +60,23 @@ async function workload(db: D1Database, u: SessionUser) {
   return results.map((r) => ({ userId: r.id, name: r.name, open: r.open, late: r.late, submitted: r.submitted }));
 }
 
+/** Open-record counts for the registers the caller can read, in one round trip. */
 async function registerCounts(db: D1Database, u: SessionUser) {
-  const out: { id: string; name: string; open: number }[] = [];
-  for (const reg of REGISTERS.filter((r) => canReadRegister(u, r.id))) {
+  const regs = REGISTERS.filter((r) => canReadRegister(u, r.id));
+  if (regs.length === 0) return [];
+  const stmts = regs.map((reg) => {
     const done = reg.doneValues;
+    // statusKey comes from the shared schema constants only, never from user input.
     const status = `COALESCE(json_extract(data, '$.${reg.statusKey}'), '')`;
-    const row = await db
+    return db
       .prepare(
         `SELECT COUNT(*) AS n FROM records WHERE collection = ? AND deleted_at IS NULL
          ${done.length ? `AND ${status} NOT IN (${done.map(() => "?").join(",")})` : ""}`,
       )
-      .bind(reg.id, ...done)
-      .first<{ n: number }>();
-    out.push({ id: reg.id, name: reg.name, open: row!.n });
-  }
-  return out;
+      .bind(reg.id, ...done);
+  });
+  const results = await db.batch<{ n: number }>(stmts);
+  return regs.map((reg, i) => ({ id: reg.id, name: reg.name, open: results[i].results[0]?.n ?? 0 }));
 }
 
 async function hrSections(db: D1Database, today: string) {

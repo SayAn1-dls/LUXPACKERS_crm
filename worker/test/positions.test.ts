@@ -221,6 +221,19 @@ describe("task scopes from the position", () => {
     expect(await post(all, stranger.id)).toBe(201);
   });
 
+  it("submit notifies the assigner, team reviewers of the department and every tasks=all reviewer (not admins)", async () => {
+    const all = await makeUser("employee", "Marketing", { perms: await permsLike("employee", { tasks: "all" }) });
+    const deptMgr = await makeUser("manager", "Finance");
+    const otherMgr = await makeUser("manager", "Operations");
+    const admin = await makeUser("admin", "Management");
+    const e = await makeUser("employee", "Finance");
+    const id = await seedTask({ dept: "Finance", assignee: e.id, by: admin.id });
+    expect((await api(e.cookie, "POST", `/api/tasks/${id}/submit`, {})).status).toBe(200);
+    const { results } = await env.DB.prepare("SELECT user_id FROM notifications WHERE kind = 'submitted'").all<any>();
+    expect(results.map((r) => r.user_id).sort()).toEqual([admin.id, all.id, deptMgr.id].sort());
+    expect(results.some((r) => r.user_id === otherMgr.id)).toBe(false);
+  });
+
   it("tasks=all approves a submitted task but never their own", async () => {
     const all = await makeUser("employee", "Marketing", { perms: await permsLike("employee", { tasks: "all" }) });
     const a = await makeUser("employee", "Finance");
@@ -286,6 +299,22 @@ describe("people: addPeople and private fields", () => {
     // Choosing the password, or waiving the change at first sign-in, is admin-only.
     expect((await api(hr.cookie, "POST", "/api/users", newUser({ password: "a-long-password" }))).status).toBe(403);
     expect((await api(hr.cookie, "POST", "/api/users", newUser({ mustChangePassword: false }))).status).toBe(403);
+  });
+
+  it("a non-admin creating an account notifies every active admin (and people=full); an admin creating one does not notify admins", async () => {
+    const a1 = await makeUser("admin", "Management");
+    const a2 = await makeUser("admin", "Management");
+    await makeUser("admin", "Management", { status: "left" });
+    const hr = await makeUser("hr", "People & Interns");
+    expect((await api(hr.cookie, "POST", "/api/users", newUser({ name: "Bo" }))).status).toBe(201);
+    const { results } = await env.DB.prepare("SELECT user_id, kind, link FROM notifications").all<any>();
+    expect(results.filter((n) => n.link === "/users").map((n) => n.user_id).sort()).toEqual([a1.id, a2.id].sort());
+    for (const n of results) expect(n.kind).toBe("user_created");
+    expect(results.some((n) => n.user_id === hr.id)).toBe(false);
+    await env.DB.prepare("DELETE FROM notifications").run();
+    await api(a1.cookie, "POST", "/api/users", newUser({ name: "Cy" }));
+    const after = await env.DB.prepare("SELECT user_id FROM notifications").all<any>();
+    expect(after.results.some((n) => n.user_id === a1.id || n.user_id === a2.id)).toBe(false);
   });
 
   it("a custom addPeople position with people=basic can add but cannot list users or see private fields", async () => {
@@ -384,6 +413,56 @@ describe("admin sets email and password", () => {
     const audits = await env.DB.prepare("SELECT action, detail FROM audit_log ORDER BY action").all<any>();
     expect(audits.results.map((a) => a.action).filter((a) => a !== "login")).toEqual(["password_set", "user_updated"]);
     expect(JSON.parse(audits.results.find((a) => a.action === "user_updated").detail).fields).toEqual(["title"]);
+  });
+});
+
+describe("no side effects when the write does not happen", () => {
+  it("users PATCH: a 0-row UPDATE returns 409 and deletes no sessions and writes no audit", async () => {
+    const a = await makeUser("admin", "Management");
+    const b = await makeUser("admin", "Management");
+    // Simulates losing the last-admin race: the guarded UPDATE changes no row.
+    await env.DB.prepare(`CREATE TRIGGER skip_b BEFORE UPDATE ON users WHEN OLD.id = '${b.id}' BEGIN SELECT RAISE(IGNORE); END`).run();
+    try {
+      for (const body of [{ status: "left" }, { positionId: "pos_employee", password: "new-password-1", title: "x" }]) {
+        const r = await api(a.cookie, "PATCH", `/api/users/${b.id}`, body);
+        expect(r.status).toBe(409);
+        expect(await r.json()).toEqual({ error: "last_admin" });
+      }
+    } finally {
+      await env.DB.prepare("DROP TRIGGER skip_b").run();
+    }
+    expect((await api(b.cookie, "GET", "/api/me")).status).toBe(200);
+    const audits = await env.DB.prepare("SELECT action FROM audit_log WHERE action != 'login'").all<any>();
+    expect(audits.results).toEqual([]);
+  });
+
+  it("two admins demoting each other at once leave exactly one admin and one audit trail", async () => {
+    const a = await makeUser("admin", "Management");
+    const b = await makeUser("admin", "Management");
+    const [ra, rb] = await Promise.all([
+      api(a.cookie, "PATCH", `/api/users/${b.id}`, { status: "left" }),
+      api(b.cookie, "PATCH", `/api/users/${a.id}`, { status: "left" }),
+    ]);
+    expect([ra.status, rb.status].sort()).toEqual([200, 409]);
+    const n = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM users u JOIN positions p ON p.id = u.position_id WHERE p.is_admin = 1 AND u.status != 'left'",
+    ).first<any>();
+    expect(n.n).toBe(1);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'user_disabled'").first<any>()).n).toBe(1);
+    const survivor = ra.status === 200 ? a : b;
+    expect((await api(survivor.cookie, "GET", "/api/me")).status).toBe(200);
+  });
+
+  it("positions DELETE: a 0-row DELETE returns 409 and writes no audit", async () => {
+    const admin = await makeUser("admin", "Management");
+    const id = (await json(await api(admin.cookie, "POST", "/api/positions", { name: "Ghost", perms: perms() }))).position.id;
+    await env.DB.prepare("CREATE TRIGGER keep_pos BEFORE DELETE ON positions BEGIN SELECT RAISE(IGNORE); END").run();
+    try {
+      expect((await api(admin.cookie, "DELETE", `/api/positions/${id}`)).status).toBe(409);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER keep_pos").run();
+    }
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'position_deleted'").first<any>()).n).toBe(0);
   });
 });
 

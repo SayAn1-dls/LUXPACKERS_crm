@@ -241,18 +241,17 @@ tasks.post("/:id/submit", async (c) => {
   if (parsed.data.version !== undefined && parsed.data.version !== row.version) return c.json({ error: "conflict" }, 409);
 
   const now = new Date().toISOString();
-  const managers = row.dept
-    ? (
-        await db
-          // Non-admin "team" reviewers of the task's department (admins review from their queue).
-          .prepare(
-            `SELECT u.id FROM users u JOIN positions p ON p.id = u.position_id
-             WHERE p.is_admin = 0 AND json_extract(p.perms, '$.tasks') = 'team' AND u.dept = ? AND u.status != 'left' AND u.id != ?`,
-          )
-          .bind(row.dept, u.id)
-          .all<{ id: string }>()
-      ).results.map((m) => m.id)
-    : [];
+  // Non-admin reviewers: tasks=all, or tasks=team in the task's department (admins review from their queue).
+  const managers = (
+    await db
+      .prepare(
+        `SELECT u.id FROM users u JOIN positions p ON p.id = u.position_id
+         WHERE p.is_admin = 0 AND u.status != 'left' AND u.id != ?
+           AND (json_extract(p.perms, '$.tasks') = 'all' OR (json_extract(p.perms, '$.tasks') = 'team' AND u.dept = ?))`,
+      )
+      .bind(u.id, row.dept ?? "")
+      .all<{ id: string }>()
+  ).results.map((m) => m.id);
   const who = row.assigned_by_id ? [row.assigned_by_id, ...managers] : managers;
   const res = await db.batch([
     db

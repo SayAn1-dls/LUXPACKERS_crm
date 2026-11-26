@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { DEPT_NAMES, EMPLOYEE_POSITION_ID, ONBOARDING_STEPS, ROLES } from "../../../shared/schema";
 import type { AppEnv, Role } from "../env";
-import { auditStmt } from "../lib/audit";
+import { auditStmt, auditStmtWhen } from "../lib/audit";
 import { hashPassword } from "../lib/crypto";
 import { notifyStmts } from "../lib/notify";
 import { canAddPeople, canCreateUserWithPosition, canEditUsers, canSeePeoplePrivate } from "../lib/policy";
@@ -201,6 +201,13 @@ users.post("/", async (c) => {
     )
     .all<{ id: string }>();
   stmts.push(...notifyStmts(db, hrs.results.map((r) => r.id).filter((x) => x !== actor.id), "user_created", `New account created: ${b.name}`, "/people"));
+  // An account made by someone other than an admin is also announced to every active admin.
+  if (!actor.isAdmin) {
+    const admins = await db
+      .prepare("SELECT u.id FROM users u JOIN positions p ON p.id = u.position_id WHERE p.is_admin = 1 AND u.status != 'left'")
+      .all<{ id: string }>();
+    stmts.push(...notifyStmts(db, admins.results.map((r) => r.id), "user_created", `${actor.name} created an account: ${b.name}`, "/users"));
+  }
   stmts.push(
     auditStmt(db, actor, "user_created", "user", id, b.name, {
       positionId: position.id, dept: b.dept, status: b.status, passwordSetBy: tempPassword ? "generated" : "admin", mustChange,
@@ -283,18 +290,23 @@ users.patch("/:id", async (c) => {
   }
   // Re-checked inside the write so two admins demoting each other at once cannot leave none.
   const guard = losesAdmin ? ` AND (${OTHER_ADMINS}) > 0` : "";
+  // Every follow-up only runs if the UPDATE above really happened (it stamps this request's updated_at), so a
+  // write that changed nothing (lost last-admin race) leaves no sessions deleted and no audit behind.
+  const done = { sql: "EXISTS (SELECT 1 FROM users WHERE id = ? AND updated_at = ?)", args: [id, now] };
   const stmts = [
     db
       .prepare(`UPDATE users SET ${sets.join(", ")}, updated_at = ? WHERE id = ?${guard}`)
       .bind(...vals, now, id, ...(losesAdmin ? [id] : [])),
   ];
-  if (disabling || password !== undefined) stmts.push(db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id));
-  if (disabling) stmts.push(auditStmt(db, actor, "user_disabled", "user", id, target.name));
+  if (disabling || password !== undefined) {
+    stmts.push(db.prepare(`DELETE FROM sessions WHERE user_id = ? AND ${done.sql}`).bind(id, ...done.args));
+  }
+  if (disabling) stmts.push(auditStmtWhen(db, done, actor, "user_disabled", "user", id, target.name));
   if (password !== undefined) {
-    stmts.push(auditStmt(db, actor, "password_set", "user", id, target.name, { mustChange: mustChangePassword ?? true }));
+    stmts.push(auditStmtWhen(db, done, actor, "password_set", "user", id, target.name, { mustChange: mustChangePassword ?? true }));
   }
   const others = disabling ? fields.filter((f) => f !== "status") : fields;
-  if (others.length > 0) stmts.push(auditStmt(db, actor, "user_updated", "user", id, target.name, { fields: others }));
+  if (others.length > 0) stmts.push(auditStmtWhen(db, done, actor, "user_updated", "user", id, target.name, { fields: others }));
   let res: D1Result[];
   try {
     res = await db.batch(stmts);
@@ -328,24 +340,4 @@ users.post("/:id/password", async (c) => {
     auditStmt(db, actor, "password_set", "user", id, target.name, { mustChange }),
   ]);
   return c.json({ ok: true });
-});
-
-/** Generates a temporary password, shown once. Signs the person out everywhere. */
-users.post("/:id/reset-password", async (c) => {
-  const actor = c.var.user!;
-  if (!canEditUsers(actor)) return c.json({ error: "forbidden" }, 403);
-  const db = c.env.DB;
-  const id = c.req.param("id");
-  const target = await loadUser(db, id);
-  if (!target) return c.json({ error: "not_found" }, 404);
-  const tempPassword = generateTempPassword();
-  const { hash, salt } = await hashPassword(tempPassword);
-  await db.batch([
-    db
-      .prepare("UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 1, updated_at = ? WHERE id = ?")
-      .bind(hash, salt, new Date().toISOString(), id),
-    db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
-    auditStmt(db, actor, "password_reset", "user", id, target.name),
-  ]);
-  return c.json({ tempPassword });
 });

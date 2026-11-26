@@ -156,23 +156,24 @@ describe("PATCH /api/users/:id", () => {
   });
 });
 
-describe("POST /api/users/:id/reset-password", () => {
-  it("admin resets (hr cannot); new password works, old sessions die, must change", async () => {
+describe("POST /api/users/:id/password (admin sets a password)", () => {
+  it("admin sets (hr cannot); new password works, old sessions die, must change", async () => {
     const admin = await makeUser("admin", "Management");
     const hr = await makeUser("hr", "People & Interns");
     const emp = await makeUser("employee", "Operations");
-    expect((await api(hr.cookie, "POST", `/api/users/${emp.id}/reset-password`, {})).status).toBe(403);
-    const res = await api(admin.cookie, "POST", `/api/users/${emp.id}/reset-password`, {});
-    expect(res.status).toBe(200);
-    const { tempPassword } = (await res.json()) as any;
-    expect(tempPassword).toMatch(/^[A-HJ-NP-Za-km-z2-9]{12}$/);
+    expect((await api(hr.cookie, "POST", `/api/users/${emp.id}/password`, { password: "set-by-admin-1" })).status).toBe(403);
+    expect((await api(admin.cookie, "POST", `/api/users/${emp.id}/password`, { password: "set-by-admin-1" })).status).toBe(200);
     expect((await api(emp.cookie, "GET", "/api/me")).status).toBe(401);
-    expect((await api(null, "POST", "/api/auth/login", { email: emp.email, password: tempPassword })).status).toBe(200);
+    expect((await api(null, "POST", "/api/auth/login", { email: emp.email, password: "set-by-admin-1" })).status).toBe(200);
     const row = await env.DB.prepare("SELECT must_change_password FROM users WHERE id = ?").bind(emp.id).first<any>();
     expect(row.must_change_password).toBe(1);
-    const a = await env.DB.prepare("SELECT detail FROM audit_log WHERE action = 'password_reset'").all<any>();
-    expect(a.results.length).toBe(1);
-    expect(JSON.stringify(a.results)).not.toContain(tempPassword);
+  });
+
+  it("the old reset-password route is gone", async () => {
+    const admin = await makeUser("admin", "Management");
+    const emp = await makeUser("employee", "Operations");
+    expect((await api(admin.cookie, "POST", `/api/users/${emp.id}/reset-password`, {})).status).toBe(404);
+    expect((await api(admin.cookie, "POST", `/api/users/${admin.id}/reset-password`, {})).status).toBe(404);
   });
 });
 
@@ -221,17 +222,16 @@ describe("fix round 1: escalation paths", () => {
     expect((await api(mgr.cookie, "GET", "/api/users")).status).toBe(403);
     expect((await api(mgr.cookie, "POST", "/api/users", newUser())).status).toBe(403);
     expect((await api(mgr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "x" })).status).toBe(403);
-    expect((await api(mgr.cookie, "POST", `/api/users/${emp.id}/reset-password`, {})).status).toBe(403);
+    expect((await api(mgr.cookie, "POST", `/api/users/${emp.id}/password`, { password: "long-enough-1" })).status).toBe(403);
   });
 
-  it("employee cannot reset a password; unknown id is 404 for admin", async () => {
+  it("employee cannot set a password; unknown id is 404 for admin", async () => {
     const emp = await makeUser("employee", "Operations");
     const other = await makeUser("employee", "Operations");
     const admin = await makeUser("admin", "Management");
-    expect((await api(emp.cookie, "POST", `/api/users/${other.id}/reset-password`, {})).status).toBe(403);
-    expect((await api(admin.cookie, "POST", `/api/users/nope/reset-password`, {})).status).toBe(404);
+    expect((await api(emp.cookie, "POST", `/api/users/${other.id}/password`, { password: "long-enough-1" })).status).toBe(403);
+    expect((await api(admin.cookie, "POST", `/api/users/nope/password`, { password: "long-enough-1" })).status).toBe(404);
   });
-
   it("HR cannot re-activate a left manager; admin can", async () => {
     const hr = await makeUser("hr", "People & Interns");
     const admin = await makeUser("admin", "Management");
