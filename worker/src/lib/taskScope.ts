@@ -1,8 +1,8 @@
 /* The one place that knows how a task row is selected, shaped, and scoped to a caller.
    tasks.ts, the dashboard and search all build their task queries from here. */
 import type { Task } from "../../../shared/schema";
-import type { SessionUser } from "../env";
-import type { AssigneeRef, TaskRef } from "./policy";
+import { taskLevel } from "./policy";
+import type { AssigneeRef, PolicyUser, TaskRef } from "./policy";
 
 export interface TaskRow {
   id: string;
@@ -66,7 +66,7 @@ export const taskAssigneeOf = (r: TaskRow): AssigneeRef | null => (r.assignee_id
 export type TaskScope = "mine" | "assigned" | "team" | "all" | "default" | "visible";
 
 /** Where-clauses (AND-ed) and bind args for a scope. Callers enforce who may ask for which scope. */
-export function taskScopeWhere(u: Pick<SessionUser, "id" | "dept" | "role">, scope: TaskScope): { where: string[]; args: unknown[] } {
+export function taskScopeWhere(u: PolicyUser, scope: TaskScope): { where: string[]; args: unknown[] } {
   switch (scope) {
     case "mine":
       return { where: ["t.assignee_id = ?"], args: [u.id] };
@@ -77,8 +77,8 @@ export function taskScopeWhere(u: Pick<SessionUser, "id" | "dept" | "role">, sco
     case "all":
       return { where: [], args: [] };
     case "visible":
-      if (u.role === "admin") return { where: [], args: [] };
-      if (u.role === "manager") {
+      if (taskLevel(u) === "all") return { where: [], args: [] };
+      if (taskLevel(u) === "team") {
         return {
           where: ["(t.assignee_id = ? OR t.assigned_by_id = ? OR t.dept = ? OR a.manager_id = ?)"],
           args: [u.id, u.id, u.dept, u.id],

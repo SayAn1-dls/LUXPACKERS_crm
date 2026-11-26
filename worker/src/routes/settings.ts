@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../env";
 import { auditStmt } from "../lib/audit";
 import { isRealDate } from "../lib/dates";
+import { canEditSettings } from "../lib/policy";
 import { requireUser } from "../lib/session";
 
 export interface Settings {
@@ -46,7 +47,7 @@ settings.get("/", async (c) => c.json(await loadSettings(c.env.DB)));
 
 settings.patch("/", async (c) => {
   const u = c.var.user!;
-  if (u.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (!canEditSettings(u)) return c.json({ error: "forbidden" }, 403);
   const parsed = PatchBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "invalid" }, 400);
   const b = parsed.data;

@@ -17,13 +17,19 @@ const ids = (list: any[]) => list.map((t) => t.id).sort();
 const OPS = "Operations";
 
 describe("employee dashboard", () => {
-  it("has no manager/hr/admin keys", async () => {
+  it("has no manager/hr/admin keys; register counts only for registers the position can read", async () => {
     const e = await makeUser("employee", OPS);
     const d = await get(e);
-    for (const k of ["overdue", "today", "week", "sentBack", "waitingOnMe", "submitted", "leaveBalance", "unread"]) expect(d).toHaveProperty(k);
-    for (const k of ["reviewQueue", "workload", "pendingLeave", "registers", "onboarding", "joiningSoon", "figures", "attention", "next7", "departments", "latest"]) {
+    for (const k of ["overdue", "today", "week", "sentBack", "waitingOnMe", "submitted", "leaveBalance", "unread", "registers"]) expect(d).toHaveProperty(k);
+    for (const k of ["reviewQueue", "workload", "pendingLeave", "onboarding", "joiningSoon", "figures", "attention", "next7", "departments", "latest"]) {
       expect(d).not.toHaveProperty(k);
     }
+    expect(d.registers.map((r: any) => r.id)).toEqual(["leads", "bookings", "trips", "partners", "content"]);
+  });
+
+  it("a position with no readable register gets no register counts", async () => {
+    const h = await makeUser("hr", OPS);
+    expect(await get(h)).not.toHaveProperty("registers");
   });
 
   it("buckets overdue / today / week / submitted from my own open tasks only", async () => {

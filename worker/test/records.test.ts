@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { api, applyMigrations, makeUser } from "./helpers";
+import { api, applyMigrations, makeUser, permsLike } from "./helpers";
 
 beforeAll(async () => {
   await applyMigrations();
@@ -34,11 +34,37 @@ describe("department scoping", () => {
     expect(await res.json()).toEqual({ error: "forbidden" });
     expect((await api(e.cookie, "POST", "/api/records/finance", { data: { entry: "x", flow: "In", amount: 1 } })).status).toBe(403);
   });
-  it("Finance employee reads finance ok", async () => {
+  it("department alone no longer opens a register: a Finance-dept Employee still gets 403 on finance", async () => {
     const e = await makeUser("employee", FIN);
-    const res = await api(e.cookie, "GET", "/api/records/finance");
+    expect((await api(e.cookie, "GET", "/api/records/finance")).status).toBe(403);
+  });
+  it("a Sales-dept Employee can now read trips (Employee position: trips = edit)", async () => {
+    const e = await makeUser("employee", SALES);
+    expect((await api(e.cookie, "GET", "/api/records/trips")).status).toBe(200);
+  });
+  it("custom position finance=view: read ok, create/edit/delete 403, in any department", async () => {
+    const admin = await makeUser("admin", "Management");
+    const fid = ((await (await api(admin.cookie, "POST", "/api/records/finance", { data: { entry: "Rent", flow: "Out", amount: 5 } })).json()) as any).record.id;
+    const v = await makeUser("employee", "Marketing", { perms: await permsLike("employee", { registers: { finance: "view" } }) });
+    const res = await api(v.cookie, "GET", "/api/records/finance");
     expect(res.status).toBe(200);
-    expect(((await res.json()) as any).rows).toEqual([]);
+    expect(((await res.json()) as any).rows.map((r: any) => r.id)).toEqual([fid]);
+    expect((await api(v.cookie, "POST", "/api/records/finance", { data: { entry: "x", flow: "In", amount: 1 } })).status).toBe(403);
+    expect((await api(v.cookie, "PATCH", `/api/records/finance/${fid}`, { version: 1, data: { amount: 2 } })).status).toBe(403);
+    expect((await api(v.cookie, "DELETE", `/api/records/finance/${fid}`)).status).toBe(403);
+  });
+  it("custom position finance=edit writes but cannot delete; finance=manage deletes", async () => {
+    const ed = await makeUser("employee", SALES, { perms: await permsLike("employee", { registers: { finance: "edit" } }) });
+    const res = await api(ed.cookie, "POST", "/api/records/finance", { data: { entry: "Fuel", flow: "Out", amount: 10 } });
+    expect(res.status).toBe(201);
+    const { record } = (await res.json()) as any;
+    expect((await api(ed.cookie, "PATCH", `/api/records/finance/${record.id}`, { version: 1, data: { amount: 11 } })).status).toBe(200);
+    expect((await api(ed.cookie, "DELETE", `/api/records/finance/${record.id}`)).status).toBe(403);
+    const head = await makeUser("employee", "Marketing", { perms: await permsLike("employee", { registers: { finance: "manage" } }) });
+    expect((await api(head.cookie, "DELETE", `/api/records/finance/${record.id}`)).status).toBe(200);
+    // Trash and restore stay admin-only.
+    expect((await api(head.cookie, "GET", "/api/records/finance?trash=1")).status).toBe(403);
+    expect((await api(head.cookie, "POST", `/api/records/finance/${record.id}/restore`)).status).toBe(403);
   });
   it("unknown collection is 404; unauthenticated is 401", async () => {
     const e = await makeUser("admin", "Management");
@@ -67,8 +93,8 @@ describe("owner=none filter", () => {
     const asEmp = await api(e.cookie, "GET", "/api/records/bookings?owner=none");
     expect(asEmp.status).toBe(200);
     expect(((await asEmp.json()) as any).rows.map((r: any) => r.id)).toEqual([orphan.id]);
-    // still gated by register access
-    const hr = await makeUser("employee", "People & Interns");
+    // still gated by register access (HR starter position: every register none)
+    const hr = await makeUser("hr", "People & Interns");
     expect((await api(hr.cookie, "GET", "/api/records/bookings?owner=none")).status).toBe(403);
     expect((await api(admin.cookie, "GET", "/api/records/bookings?owner=someone")).status).toBe(400);
   });
@@ -89,7 +115,7 @@ describe("create and validation", () => {
     expect((await auditRows()).map((a) => [a.action, a.entity])).toEqual([["record_created", "bookings"]]);
   });
   it("dept defaults to the single owning department else the caller's", async () => {
-    const e = await makeUser("employee", FIN);
+    const e = await makeUser("employee", FIN, { perms: await permsLike("employee", { registers: { finance: "edit" } }) });
     const res = await api(e.cookie, "POST", "/api/records/finance", { data: { entry: "Fuel", flow: "Out", amount: 10 } });
     expect(((await res.json()) as any).record.dept).toBe(FIN);
     const admin = await makeUser("admin", "Management");
@@ -274,7 +300,7 @@ describe("update", () => {
   it("missing or deleted record → 404; no register access → 403", async () => {
     const e = await makeUser("employee", SALES);
     expect((await api(e.cookie, "PATCH", "/api/records/bookings/nope", { version: 1, data: {} })).status).toBe(404);
-    const fin = await makeUser("employee", FIN);
+    const fin = await makeUser("employee", FIN, { perms: await permsLike("employee", { registers: { finance: "edit" } }) });
     const { record } = await mkBooking(e);
     expect((await api(fin.cookie, "PATCH", `/api/records/bookings/${record.id}`, { version: 1, data: { trip: "x" } })).status).toBe(200);
     const sales2 = await makeUser("employee", SALES);
@@ -300,11 +326,13 @@ describe("delete and restore", () => {
     expect((await api(e.cookie, "PATCH", `/api/records/bookings/${record.id}`, { version: 2, data: { trip: "x" } })).status).toBe(404);
     expect((await auditRows()).map((a) => a.action)).toContain("record_deleted");
   });
-  it("manager of another department cannot delete", async () => {
+  it("delete follows the position, not the department", async () => {
     const e = await makeUser("employee", SALES);
     const other = await makeUser("manager", "Marketing");
+    const noDelete = await makeUser("manager", SALES, { perms: await permsLike("manager", { registers: { bookings: "edit" } }) });
     const { record } = await mkBooking(e);
-    expect((await api(other.cookie, "DELETE", `/api/records/bookings/${record.id}`)).status).toBe(403);
+    expect((await api(noDelete.cookie, "DELETE", `/api/records/bookings/${record.id}`)).status).toBe(403);
+    expect((await api(other.cookie, "DELETE", `/api/records/bookings/${record.id}`)).status).toBe(200);
   });
   it("restore is admin only and 404 if not deleted", async () => {
     const e = await makeUser("employee", SALES);

@@ -6,7 +6,7 @@ import type { AppEnv, SessionUser } from "../env";
 import { auditStmt } from "../lib/audit";
 import { todayIST } from "../lib/dates";
 import { notifyStmts } from "../lib/notify";
-import { canApproveTask, canAssignTo, canEditTaskStatus, canSeeTask } from "../lib/policy";
+import { canApproveTask, canAssignTo, canEditTaskStatus, canSeeTask, taskLevel } from "../lib/policy";
 import type { AssigneeRef, TaskRef } from "../lib/policy";
 import { requireUser } from "../lib/session";
 import { TASK_SELECT, parseLinks, taskAssigneeOf, taskRefOf, taskScopeWhere, taskToApi } from "../lib/taskScope";
@@ -68,14 +68,14 @@ tasks.get("/", async (c) => {
   const u = c.var.user!;
   const scope = c.req.query("scope");
   if (scope !== undefined && !["mine", "assigned", "team", "all"].includes(scope)) return c.json({ error: "invalid" }, 400);
-  if (scope === "all" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
-  if (scope === "team" && u.role !== "manager" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (scope === "all" && taskLevel(u) !== "all") return c.json({ error: "forbidden" }, 403);
+  if (scope === "team" && taskLevel(u) === "own") return c.json({ error: "forbidden" }, 403);
 
   const unassigned = c.req.query("unassigned");
   if (unassigned !== undefined && (unassigned !== "1" || scope !== "all")) return c.json({ error: "invalid" }, 400);
 
   const { where, args } = taskScopeWhere(u, (scope ?? "default") as TaskScope);
-  // "Needs an owner": open tasks nobody is assigned to (admin only, because scope=all already is).
+  // "Needs an owner": open tasks nobody is assigned to (tasks=all only, because scope=all already is).
   if (unassigned) where.push("t.assignee_id IS NULL", "t.status != 'Done'");
   const status = c.req.query("status");
   if (status) {
@@ -244,7 +244,11 @@ tasks.post("/:id/submit", async (c) => {
   const managers = row.dept
     ? (
         await db
-          .prepare("SELECT id FROM users WHERE role = 'manager' AND dept = ? AND status != 'left' AND id != ?")
+          // Non-admin "team" reviewers of the task's department (admins review from their queue).
+          .prepare(
+            `SELECT u.id FROM users u JOIN positions p ON p.id = u.position_id
+             WHERE p.is_admin = 0 AND json_extract(p.perms, '$.tasks') = 'team' AND u.dept = ? AND u.status != 'left' AND u.id != ?`,
+          )
           .bind(row.dept, u.id)
           .all<{ id: string }>()
       ).results.map((m) => m.id)

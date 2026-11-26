@@ -1,13 +1,14 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { auditPage, parseCursor } from "../lib/auditFeed";
+import { canSeeAudit } from "../lib/policy";
 import { requireUser } from "../lib/session";
 
 export const auditRoutes = new Hono<AppEnv>();
 auditRoutes.use("*", requireUser);
 
 auditRoutes.get("/", async (c) => {
-  if (c.var.user!.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (!canSeeAudit(c.var.user!)) return c.json({ error: "forbidden" }, 403);
   const rawLimit = c.req.query("limit");
   let limit = 100;
   if (rawLimit !== undefined) {

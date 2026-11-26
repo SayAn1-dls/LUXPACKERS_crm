@@ -105,57 +105,64 @@ describe("POST /api/users", () => {
 
 describe("PATCH /api/users/:id", () => {
   it("setting status left kills that user's sessions", async () => {
-    const hr = await makeUser("hr", "People & Interns");
+    const admin = await makeUser("admin", "Management");
     const emp = await makeUser("employee", "Operations");
     expect((await api(emp.cookie, "GET", "/api/me")).status).toBe(200);
-    const res = await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { status: "left" });
+    const res = await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { status: "left" });
     expect(res.status).toBe(200);
     expect((await api(emp.cookie, "GET", "/api/me")).status).toBe(401);
     const a = await env.DB.prepare("SELECT action FROM audit_log WHERE action = 'user_disabled'").all();
     expect(a.results.length).toBe(1);
   });
 
-  it("role change: admin only; self-change and self-leave forbidden", async () => {
+  it("position change: admin only; self-change and self-leave forbidden (or last_admin when alone)", async () => {
     const admin = await makeUser("admin", "Management");
     const hr = await makeUser("hr", "People & Interns");
     const emp = await makeUser("employee", "Operations");
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { positionId: "pos_manager" })).status).toBe(403);
     expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { role: "manager" })).status).toBe(403);
-    expect((await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { role: "manager" })).status).toBe(200);
-    expect((await api(admin.cookie, "PATCH", `/api/users/${admin.id}`, { role: "employee" })).status).toBe(403);
+    // Deprecated `role` still maps onto the starter position.
+    const r = await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { role: "manager" });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as any).user).toMatchObject({ positionId: "pos_manager", positionName: "Manager", role: "manager" });
+    expect((await api(admin.cookie, "PATCH", `/api/users/${admin.id}`, { positionId: "pos_employee" })).status).toBe(409);
+    await makeUser("admin", "Management");
+    expect((await api(admin.cookie, "PATCH", `/api/users/${admin.id}`, { positionId: "pos_employee" })).status).toBe(403);
     expect((await api(admin.cookie, "PATCH", `/api/users/${admin.id}`, { status: "left" })).status).toBe(403);
   });
-
-  it("hr can edit a manager's profile (canEditProfile) but cannot disable one; can edit employee profile; audit lists field names only", async () => {
+  it("only admin edits people; HR (people full) cannot edit anyone; audit lists field names only", async () => {
+    const admin = await makeUser("admin", "Management");
     const hr = await makeUser("hr", "People & Interns");
     const mgr = await makeUser("manager", "Operations");
     const emp = await makeUser("employee", "Operations");
-    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { title: "Lead" })).status).toBe(200);
-    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { status: "left" })).status).toBe(403);
-    const ok = await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Executive", phone: "99999", managerId: mgr.id });
+    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { title: "Lead" })).status).toBe(403);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Lead" })).status).toBe(403);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { status: "left" })).status).toBe(403);
+    const ok = await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Executive", phone: "99999", managerId: mgr.id });
     expect(ok.status).toBe(200);
     const a = await env.DB.prepare("SELECT detail FROM audit_log WHERE action = 'user_updated' AND entity_id = ?").bind(emp.id).first<any>();
     expect(JSON.parse(a.detail).fields.sort()).toEqual(["managerId", "phone", "title"]);
     expect(a.detail).not.toContain("99999");
   });
-
   it("employee -> 403; unknown id -> 404; bad manager -> 400; self as manager -> 400", async () => {
-    const hr = await makeUser("hr", "People & Interns");
+    const hr = await makeUser("admin", "People & Interns");
     const emp = await makeUser("employee", "Operations");
     expect((await api(emp.cookie, "PATCH", `/api/users/${emp.id}`, { title: "x" })).status).toBe(403);
     expect((await api(hr.cookie, "PATCH", `/api/users/nope`, { title: "x" })).status).toBe(404);
     expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { managerId: "ghost" })).status).toBe(400);
     expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { managerId: emp.id })).status).toBe(400);
     expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { dept: "Nowhere" })).status).toBe(400);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { positionId: "pos_nope" })).status).toBe(400);
   });
 });
 
 describe("POST /api/users/:id/reset-password", () => {
-  it("hr resets employee, not manager; new password works, old sessions die, must change", async () => {
+  it("admin resets (hr cannot); new password works, old sessions die, must change", async () => {
+    const admin = await makeUser("admin", "Management");
     const hr = await makeUser("hr", "People & Interns");
-    const mgr = await makeUser("manager", "Operations");
     const emp = await makeUser("employee", "Operations");
-    expect((await api(hr.cookie, "POST", `/api/users/${mgr.id}/reset-password`, {})).status).toBe(403);
-    const res = await api(hr.cookie, "POST", `/api/users/${emp.id}/reset-password`, {});
+    expect((await api(hr.cookie, "POST", `/api/users/${emp.id}/reset-password`, {})).status).toBe(403);
+    const res = await api(admin.cookie, "POST", `/api/users/${emp.id}/reset-password`, {});
     expect(res.status).toBe(200);
     const { tempPassword } = (await res.json()) as any;
     expect(tempPassword).toMatch(/^[A-HJ-NP-Za-km-z2-9]{12}$/);
@@ -233,24 +240,20 @@ describe("fix round 1: escalation paths", () => {
     expect((await api(admin.cookie, "PATCH", `/api/users/${gone.id}`, { status: "active" })).status).toBe(200);
   });
 
-  it("HR cannot change own dept; can change an employee's dept, not a manager's", async () => {
+  it("HR cannot change anyone's dept or manager, own included", async () => {
     const hr = await makeUser("hr", "People & Interns");
     const emp = await makeUser("employee", "Operations");
-    const mgr = await makeUser("manager", "Operations");
     expect((await api(hr.cookie, "PATCH", `/api/users/${hr.id}`, { dept: "Finance" })).status).toBe(403);
     expect((await api(hr.cookie, "PATCH", `/api/users/${hr.id}`, { managerId: emp.id })).status).toBe(403);
-    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { dept: "Finance" })).status).toBe(200);
-    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { dept: "Finance" })).status).toBe(403);
-    expect((await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { managerId: emp.id })).status).toBe(403);
+    expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { dept: "Finance" })).status).toBe(403);
     const row = await env.DB.prepare("SELECT dept FROM users WHERE id = ?").bind(hr.id).first<any>();
     expect(row.dept).toBe("People & Interns");
   });
-
   it("unchanged values do not trip the checks or write audit", async () => {
-    const hr = await makeUser("hr", "People & Interns");
+    const admin = await makeUser("admin", "Management");
     const mgr = await makeUser("manager", "Operations");
-    // same dept/status as current: not a change, so allowed and silent
-    const res = await api(hr.cookie, "PATCH", `/api/users/${mgr.id}`, { dept: "Operations", status: "active" });
+    // same dept/status/position as current: not a change, so allowed and silent
+    const res = await api(admin.cookie, "PATCH", `/api/users/${mgr.id}`, { dept: "Operations", status: "active", positionId: "pos_manager" });
     expect(res.status).toBe(200);
     expect(await auditCount("user_updated")).toBe(0);
   });
@@ -263,7 +266,7 @@ describe("fix round 1: escalation paths", () => {
   });
 
   it("only changed fields are audited", async () => {
-    const hr = await makeUser("hr", "People & Interns");
+    const hr = await makeUser("admin", "Management");
     const emp = await makeUser("employee", "Operations");
     await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Exec" });
     await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { title: "Exec", phone: "123" });

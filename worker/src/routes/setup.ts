@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../env";
 import { hashPassword } from "../lib/crypto";
 import { audit } from "../lib/audit";
-import { createSession, setSessionCookie } from "../lib/session";
+import { createSession, loadSessionUser, setSessionCookie } from "../lib/session";
 
 export const setup = new Hono<AppEnv>();
 
@@ -27,8 +27,8 @@ setup.post("/", async (c) => {
   const now = new Date().toISOString();
   // Atomic: only inserts while the users table is still empty.
   const res = await c.env.DB.prepare(
-    `INSERT INTO users (id, email, name, role, dept, status, password_hash, password_salt, must_change_password, created_at, updated_at)
-     SELECT ?, ?, ?, 'admin', 'Management', 'active', ?, ?, 0, ?, ?
+    `INSERT INTO users (id, email, name, role, position_id, dept, status, password_hash, password_salt, must_change_password, created_at, updated_at)
+     SELECT ?, ?, ?, 'admin', 'pos_admin', 'Management', 'active', ?, ?, 0, ?, ?
      WHERE NOT EXISTS (SELECT 1 FROM users)`,
   )
     .bind(id, email, name, hash, salt, now, now)
@@ -37,7 +37,5 @@ setup.post("/", async (c) => {
   await audit(c.env.DB, { id }, "setup", "user", id, name, { role: "admin" });
   const token = await createSession(c.env.DB, id, c.req.header("user-agent") ?? null);
   setSessionCookie(c, token);
-  return c.json({
-    user: { id, name, email, role: "admin", dept: "Management", managerId: null, mustChangePassword: false },
-  });
+  return c.json({ user: await loadSessionUser(c.env.DB, id) });
 });

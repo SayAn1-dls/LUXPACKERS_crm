@@ -1,45 +1,60 @@
 import { describe, expect, it } from "vitest";
+import type { Perms } from "../../shared/schema";
 import type { Role, SessionUser } from "../src/env";
 import {
-  canApproveTask, canAssignTo, canChangeRole, canEditProfile, canDecideLeave, canDeleteRecord, canEditTaskStatus,
-  canManageUser, canReadRegister, canSeePeoplePrivate, canSeeTask, canWriteRegister,
+  canAddPeople, canApproveTask, canAssignTo, canCreateUserWithPosition, canDecideLeave, canDeleteRecord, canEditSettings,
+  canEditTaskStatus, canEditUsers, canImport, canListLeave, canManagePositions, canReadRegister, canSeeAudit,
+  canSeePeoplePrivate, canSeeTask, canUseTrash, canWriteRegister, registerLevel,
   type AssigneeRef, type TaskRef,
 } from "../src/lib/policy";
+import { ADMIN_PERMS, NO_PERMS, STARTER_POSITIONS, parsePerms, roleLabel } from "../src/lib/positions";
 
 const ROLES: Role[] = ["admin", "manager", "hr", "employee"];
+const starter = (role: Role) => STARTER_POSITIONS.find((p) => p.id === `pos_${role}`)!;
 const mk = (role: Role, dept: string, id = `${role}-${dept}`, managerId: string | null = null): SessionUser => ({
   id, name: id, email: `${id}@x.test`, role, dept, managerId, mustChangePassword: false,
+  positionId: `pos_${role}`, positionName: starter(role).name, isAdmin: role === "admin", perms: starter(role).perms,
+});
+const custom = (perms: Partial<Perms>, dept = "Sales & Reservations", id = "c1", managerId: string | null = null): SessionUser => ({
+  ...mk("employee", dept, id, managerId), positionId: "pos_custom", positionName: "Custom", isAdmin: false,
+  perms: { ...NO_PERMS, ...perms, registers: { ...NO_PERMS.registers, ...(perms.registers ?? {}) } },
 });
 
 const SALES = "Sales & Reservations", OPS = "Operations", FIN = "Finance", TECH = "Technology", MGMT = "Management";
 
-describe("register access matrix", () => {
-  const registers: Record<string, string[]> = {
-    finance: [FIN],
-    access: [TECH],
-    bookings: [SALES, OPS, FIN],
+describe("register access by position (department no longer matters)", () => {
+  const depts = [SALES, OPS, FIN, TECH, MGMT];
+  const expected: Record<Role, Record<string, "none" | "view" | "edit" | "manage">> = {
+    admin: { leads: "manage", bookings: "manage", trips: "manage", finance: "manage", partners: "manage", content: "manage", access: "manage" },
+    manager: { leads: "manage", bookings: "manage", trips: "manage", finance: "none", partners: "manage", content: "manage", access: "none" },
+    hr: { leads: "none", bookings: "none", trips: "none", finance: "none", partners: "none", content: "none", access: "none" },
+    employee: { leads: "edit", bookings: "edit", trips: "edit", finance: "none", partners: "edit", content: "edit", access: "none" },
   };
-  const depts = [SALES, OPS, FIN, TECH, MGMT, "People & Interns", "Marketing", "Trips & Content"];
-  for (const [reg, allowed] of Object.entries(registers)) {
-    for (const role of ROLES) {
-      for (const dept of depts) {
-        const expected = role === "admin" || allowed.includes(dept);
-        it(`${role} in ${dept} ${expected ? "can" : "cannot"} read/write ${reg}`, () => {
+  for (const role of ROLES) {
+    for (const [reg, level] of Object.entries(expected[role])) {
+      it(`${role} -> ${reg}: ${level}, in every department`, () => {
+        for (const dept of depts) {
           const u = mk(role, dept);
-          expect(canReadRegister(u, reg)).toBe(expected);
-          expect(canWriteRegister(u, reg)).toBe(expected);
-        });
-        const delExpected = role === "admin" || (role === "manager" && allowed.includes(dept));
-        it(`${role} in ${dept} ${delExpected ? "can" : "cannot"} delete in ${reg}`, () => {
-          expect(canDeleteRecord(mk(role, dept), reg)).toBe(delExpected);
-        });
-      }
+          expect(registerLevel(u, reg)).toBe(level);
+          expect(canReadRegister(u, reg)).toBe(level !== "none");
+          expect(canWriteRegister(u, reg)).toBe(level === "edit" || level === "manage");
+          expect(canDeleteRecord(u, reg)).toBe(level === "manage");
+        }
+      });
     }
   }
+  it("view reads only; edit writes; manage deletes", () => {
+    const v = custom({ registers: { finance: "view" } });
+    expect([canReadRegister(v, "finance"), canWriteRegister(v, "finance"), canDeleteRecord(v, "finance")]).toEqual([true, false, false]);
+    const e = custom({ registers: { finance: "edit" } });
+    expect([canReadRegister(e, "finance"), canWriteRegister(e, "finance"), canDeleteRecord(e, "finance")]).toEqual([true, true, false]);
+    const m = custom({ registers: { finance: "manage" } });
+    expect([canReadRegister(m, "finance"), canWriteRegister(m, "finance"), canDeleteRecord(m, "finance")]).toEqual([true, true, true]);
+  });
   it("unknown register ids are denied for everyone, admin included", () => {
     for (const role of ROLES) {
       const u = mk(role, FIN);
-      for (const id of ["nope", "", "Finance", "__proto__", "tasks"]) {
+      for (const id of ["nope", "", "Finance", "__proto__", "tasks", "toString", "constructor"]) {
         expect(canReadRegister(u, id)).toBe(false);
         expect(canWriteRegister(u, id)).toBe(false);
         expect(canDeleteRecord(u, id)).toBe(false);
@@ -48,11 +63,44 @@ describe("register access matrix", () => {
   });
 });
 
+describe("admin-only areas", () => {
+  it.each(ROLES)("%s", (role) => {
+    const u = mk(role, MGMT);
+    const exp = role === "admin";
+    for (const f of [canManagePositions, canEditUsers, canImport, canSeeAudit, canUseTrash, canEditSettings]) expect(f(u)).toBe(exp);
+  });
+  it("a custom position with every permission is still not admin", () => {
+    const u = custom({ ...ADMIN_PERMS });
+    for (const f of [canManagePositions, canEditUsers, canImport, canSeeAudit, canUseTrash, canEditSettings]) expect(f(u)).toBe(false);
+  });
+});
+
+describe("positions helpers", () => {
+  it("parsePerms fails closed on anything unreadable", () => {
+    expect(parsePerms(null)).toEqual(NO_PERMS);
+    expect(parsePerms("not json")).toEqual(NO_PERMS);
+    expect(parsePerms(JSON.stringify({ ...NO_PERMS, tasks: "everything" }))).toEqual(NO_PERMS);
+    expect(parsePerms(JSON.stringify({ ...NO_PERMS, registers: { leads: "edit" } }))).toEqual(NO_PERMS);
+    expect(parsePerms(JSON.stringify(ADMIN_PERMS))).toEqual(ADMIN_PERMS);
+  });
+  it("role label follows the starter positions", () => {
+    for (const p of STARTER_POSITIONS) expect(roleLabel(p.isAdmin, p.perms)).toBe(p.role);
+  });
+});
+
 describe("canAssignTo", () => {
   const target = (id: string, dept: string, managerId: string | null = null) => ({ id, dept, managerId });
-  it("admin and hr assign to anyone", () => {
+  it("admin (all) assigns to anyone; hr starter (own) only to themselves", () => {
     expect(canAssignTo(mk("admin", MGMT), target("z", TECH))).toBe(true);
-    expect(canAssignTo(mk("hr", "People & Interns"), target("z", TECH))).toBe(true);
+    expect(canAssignTo(mk("hr", "People & Interns"), target("z", TECH))).toBe(false);
+    expect(canAssignTo(mk("hr", "People & Interns", "h"), target("h", TECH))).toBe(true);
+  });
+  it("custom tasks=all assigns to anyone; tasks=team like a manager", () => {
+    expect(canAssignTo(custom({ tasks: "all" }, SALES), target("z", TECH))).toBe(true);
+    const t = custom({ tasks: "team" }, SALES, "t1");
+    expect(canAssignTo(t, target("a", SALES))).toBe(true);
+    expect(canAssignTo(t, target("b", FIN, "t1"))).toBe(true);
+    expect(canAssignTo(t, target("c", FIN))).toBe(false);
   });
   it("manager: same dept or direct report only", () => {
     const m = mk("manager", SALES, "m1");
@@ -172,20 +220,6 @@ describe("canEditTaskStatus", () => {
   });
 });
 
-describe("canManageUser", () => {
-  it.each([
-    ["admin", "admin", true], ["admin", "manager", true], ["admin", "hr", true], ["admin", "employee", true],
-    ["hr", "employee", true], ["hr", "hr", false], ["hr", "manager", false], ["hr", "admin", false],
-    ["manager", "employee", false], ["employee", "employee", false],
-  ] as const)("%s manages %s -> %s", (r, target, exp) => {
-    expect(canManageUser(mk(r, SALES), target)).toBe(exp);
-  });
-  it("unknown target role denied", () => {
-    expect(canManageUser(mk("admin", MGMT), "root" as Role)).toBe(false);
-    expect(canManageUser(mk("hr", SALES), "" as Role)).toBe(false);
-  });
-});
-
 describe("canDecideLeave", () => {
   const req = { id: "r", managerId: "mgr" };
   it.each([
@@ -225,28 +259,60 @@ describe("canDecideLeave role check", () => {
   });
 });
 
-describe("canChangeRole", () => {
-  it.each([["admin", true], ["hr", false], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
-    expect(canChangeRole(mk(r, SALES), "employee", "manager")).toBe(exp);
+
+describe("tasks scope from position", () => {
+  const t: TaskRef = { assigneeId: "emp", assignedById: "boss", dept: SALES };
+  it("tasks=all sees and approves everything (but never their own)", () => {
+    const u = custom({ tasks: "all" }, TECH, "x");
+    expect(canSeeTask(u, t)).toBe(true);
+    expect(canApproveTask(u, t)).toBe(true);
+    expect(canApproveTask(custom({ tasks: "all" }, TECH, "emp"), t)).toBe(false);
   });
-  it("hr cannot escalate or demote", () => {
-    expect(canChangeRole(mk("hr", SALES), "employee", "admin")).toBe(false);
-    expect(canChangeRole(mk("hr", SALES), "manager", "employee")).toBe(false);
+  it("tasks=team sees same department and reports, not others", () => {
+    expect(canSeeTask(custom({ tasks: "team" }, SALES, "x"), t)).toBe(true);
+    expect(canSeeTask(custom({ tasks: "team" }, FIN, "x"), t, { managerId: "x" })).toBe(true);
+    expect(canSeeTask(custom({ tasks: "team" }, FIN, "x"), t, { managerId: "y" })).toBe(false);
   });
-  it("unknown roles denied, even for admin", () => {
-    const a = mk("admin", MGMT);
-    expect(canChangeRole(a, "root", "employee")).toBe(false);
-    expect(canChangeRole(a, "employee", "root")).toBe(false);
-    expect(canChangeRole(a, "", "")).toBe(false);
+  it("tasks=own sees only on-me or by-me", () => {
+    expect(canSeeTask(custom({ tasks: "own" }, SALES, "x"), t, { managerId: "x" })).toBe(false);
   });
 });
 
-describe("canEditProfile", () => {
-  it.each([["admin", true], ["hr", true], ["manager", false], ["employee", false]] as const)("%s -> %s", (r, exp) => {
-    for (const target of ROLES) expect(canEditProfile(mk(r, SALES), target)).toBe(exp);
+describe("leave approval and lists from position", () => {
+  it("leave=all decides anyone's but their own", () => {
+    const u = custom({ leave: "all" }, TECH, "x");
+    expect(canDecideLeave(u, { id: "r", managerId: null, dept: SALES })).toBe(true);
+    expect(canDecideLeave(u, { id: "x", managerId: null, dept: TECH })).toBe(false);
   });
-  it("unknown target role denied", () => {
-    expect(canEditProfile(mk("admin", MGMT), "root")).toBe(false);
-    expect(canEditProfile(mk("hr", SALES), "")).toBe(false);
+  it("leave=team decides same department or reports", () => {
+    const u = custom({ leave: "team" }, SALES, "x");
+    expect(canDecideLeave(u, { id: "r", managerId: null, dept: SALES })).toBe(true);
+    expect(canDecideLeave(u, { id: "r", managerId: "x", dept: FIN })).toBe(true);
+    expect(canDecideLeave(u, { id: "r", managerId: "y", dept: FIN })).toBe(false);
+  });
+  it("leave=own decides nobody's", () => {
+    expect(canDecideLeave(custom({ leave: "own" }, SALES, "x"), { id: "r", managerId: "x", dept: SALES })).toBe(false);
+  });
+  it("list tabs", () => {
+    expect(["mine", "team", "all"].map((s) => canListLeave(custom({ leave: "own" }), s as never))).toEqual([true, false, false]);
+    expect(["mine", "team", "all"].map((s) => canListLeave(custom({ leave: "team" }), s as never))).toEqual([true, true, false]);
+    expect(["mine", "team", "all"].map((s) => canListLeave(custom({ leave: "all" }), s as never))).toEqual([true, true, true]);
+    expect(canListLeave(mk("admin", MGMT), "all")).toBe(true);
+  });
+});
+
+describe("people", () => {
+  it("addPeople creates Employee-position accounts only; admin any position", () => {
+    const hr = mk("hr", "People & Interns");
+    expect(canAddPeople(hr)).toBe(true);
+    expect(canCreateUserWithPosition(hr, "pos_employee")).toBe(true);
+    for (const p of ["pos_manager", "pos_hr", "pos_admin", "pos_custom"]) expect(canCreateUserWithPosition(hr, p)).toBe(false);
+    expect(canCreateUserWithPosition(mk("admin", MGMT), "pos_manager")).toBe(true);
+    expect(canAddPeople(mk("manager", SALES))).toBe(false);
+    expect(canCreateUserWithPosition(mk("manager", SALES), "pos_employee")).toBe(false);
+  });
+  it("people=full sees private fields", () => {
+    expect(canSeePeoplePrivate(custom({ people: "full" }))).toBe(true);
+    expect(canSeePeoplePrivate(custom({ people: "basic" }))).toBe(false);
   });
 });

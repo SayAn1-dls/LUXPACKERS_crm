@@ -3,7 +3,9 @@ import { ONBOARDING_STEPS, REGISTERS } from "../../../shared/schema";
 import type { AppEnv, SessionUser } from "../env";
 import { adminSections, addDays } from "../lib/adminDashboard";
 import { todayIST } from "../lib/dates";
-import { canApproveTask, canReadRegister, canSeeTask } from "../lib/policy";
+import {
+  canApproveTask, canReadRegister, canSeeAdminDashboard, canSeePeoplePrivate, canSeeTask, leaveLevel, taskLevel,
+} from "../lib/policy";
 import { requireUser } from "../lib/session";
 import { TASK_SELECT, taskAssigneeOf, taskRefOf, taskScopeWhere, taskToApi } from "../lib/taskScope";
 import type { TaskRow, TaskScope } from "../lib/taskScope";
@@ -24,14 +26,15 @@ const taskRows = async (db: D1Database, u: SessionUser, scope: TaskScope, extra:
   ).results;
 };
 
-async function pendingLeave(db: D1Database, u: SessionUser, reportsOnly: boolean) {
+/** Pending leave I can decide: my team (same department or my reports) or everyone. Never my own. */
+async function pendingLeave(db: D1Database, u: SessionUser, teamOnly: boolean) {
   const { results } = await db
     .prepare(
       `SELECT l.id, l.user_id, l.kind, l.start, l."end", l.days, l.half_day, l.reason, l.status, p.name AS user_name
        FROM leave_requests l JOIN users p ON p.id = l.user_id
-       WHERE l.status = 'Pending' AND l.user_id != ? ${reportsOnly ? "AND p.manager_id = ?" : ""} ORDER BY l.start, l.id`,
+       WHERE l.status = 'Pending' AND l.user_id != ? ${teamOnly ? "AND (p.dept = ? OR p.manager_id = ?)" : ""} ORDER BY l.start, l.id`,
     )
-    .bind(...(reportsOnly ? [u.id, u.id] : [u.id]))
+    .bind(...(teamOnly ? [u.id, u.dept, u.id] : [u.id]))
     .all<any>();
   return results.map((r) => ({
     id: r.id, userId: r.user_id, userName: r.user_name, kind: r.kind, start: r.start, end: r.end, days: r.days,
@@ -41,7 +44,8 @@ async function pendingLeave(db: D1Database, u: SessionUser, reportsOnly: boolean
 
 async function workload(db: D1Database, u: SessionUser) {
   const today = todayIST();
-  const team = u.role === "admin" ? "" : "AND (p.dept = ? OR p.manager_id = ?)";
+  const everyone = taskLevel(u) === "all";
+  const team = everyone ? "" : "AND (p.dept = ? OR p.manager_id = ?)";
   const { results } = await db
     .prepare(
       `SELECT p.id, p.name,
@@ -51,7 +55,7 @@ async function workload(db: D1Database, u: SessionUser) {
        FROM users p LEFT JOIN tasks t ON t.assignee_id = p.id
        WHERE p.status != 'left' AND p.id != ? ${team} GROUP BY p.id ORDER BY p.name COLLATE NOCASE`,
     )
-    .bind(today, u.id, ...(u.role === "admin" ? [] : [u.dept, u.id]))
+    .bind(today, u.id, ...(everyone ? [] : [u.dept, u.id]))
     .all<{ id: string; name: string; open: number; late: number; submitted: number }>();
   return results.map((r) => ({ userId: r.id, name: r.name, open: r.open, late: r.late, submitted: r.submitted }));
 }
@@ -122,18 +126,16 @@ dashboard.get("/", async (c) => {
     unread: await unreadCount(db, u.id),
   };
 
-  const isAdmin = u.role === "admin";
-  if (u.role === "manager" || isAdmin) {
+  // Sections follow the caller's position: tasks team/all -> review queue and workload; leave team/all -> pending
+  // leave; any readable register -> register counts; people full -> onboarding; admin -> admin sections.
+  if (taskLevel(u) !== "own") {
     const queue = (await taskRows(db, u, "visible", ["t.status = 'Submitted'"])).filter((r) => canApproveTask(u, taskRefOf(r), taskAssigneeOf(r)));
     body.reviewQueue = api(queue);
     body.workload = await workload(db, u);
-    body.pendingLeave = await pendingLeave(db, u, !isAdmin);
-    body.registers = await registerCounts(db, u);
   }
-  if (u.role === "hr" || isAdmin) {
-    Object.assign(body, await hrSections(db, today));
-    body.pendingLeave = await pendingLeave(db, u, false);
-  }
-  if (isAdmin) Object.assign(body, await adminSections(db, today));
+  if (leaveLevel(u) !== "own") body.pendingLeave = await pendingLeave(db, u, leaveLevel(u) === "team");
+  if (REGISTERS.some((r) => canReadRegister(u, r.id))) body.registers = await registerCounts(db, u);
+  if (canSeePeoplePrivate(u)) Object.assign(body, await hrSections(db, today));
+  if (canSeeAdminDashboard(u)) Object.assign(body, await adminSections(db, today));
   return c.json(body);
 });

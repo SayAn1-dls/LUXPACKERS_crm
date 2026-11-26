@@ -23,6 +23,32 @@ export function api(
   );
 }
 
+let positionSeq = 0;
+
+type Perms = import("../../shared/schema").Perms;
+type RegisterLevel = import("../../shared/schema").RegisterLevel;
+
+/** A starter position's perms with some keys (and register levels) overridden. */
+export async function permsLike(
+  role: "manager" | "hr" | "employee",
+  over: Partial<Omit<Perms, "registers">> & { registers?: Record<string, RegisterLevel> } = {},
+): Promise<Perms> {
+  const { STARTER_POSITIONS } = await import("../src/lib/positions");
+  const base = STARTER_POSITIONS.find((p) => p.id === `pos_${role}`)!.perms;
+  return { ...base, ...over, registers: { ...base.registers, ...(over.registers ?? {}) } };
+}
+
+/** Creates a custom (non-admin) position and returns its id. */
+export async function makePosition(perms: import("../../shared/schema").Perms, name?: string): Promise<string> {
+  const id = `pos_test_${crypto.randomUUID().slice(0, 8)}`;
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO positions (id, name, is_admin, perms, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?)")
+    .bind(id, name ?? `Test position ${++positionSeq} ${id}`, JSON.stringify(perms), now, now)
+    .run();
+  return id;
+}
+
+/** `role` picks the matching starter position (pos_<role>) unless `positionId` or `perms` is given. */
 export async function makeUser(
   role: "admin" | "manager" | "hr" | "employee",
   deptName: string,
@@ -32,8 +58,10 @@ export async function makeUser(
     mustChangePassword?: boolean;
     email?: string;
     password?: string;
+    positionId?: string;
+    perms?: import("../../shared/schema").Perms;
   } = {},
-): Promise<{ id: string; email: string; password: string; cookie: string }> {
+): Promise<{ id: string; email: string; password: string; cookie: string; positionId: string }> {
   const { hashPassword } = await import("../src/lib/crypto");
   const { createSession } = await import("../src/lib/session");
   const id = crypto.randomUUID();
@@ -41,15 +69,17 @@ export async function makeUser(
   const password = opts.password ?? "correct-horse-battery";
   const { hash, salt } = await hashPassword(password);
   const now = new Date().toISOString();
+  const positionId = opts.positionId ?? (opts.perms ? await makePosition(opts.perms) : `pos_${role}`);
   await env.DB.prepare(
-    `INSERT INTO users (id, email, name, role, dept, manager_id, status, password_hash, password_salt, must_change_password, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, email, name, role, position_id, dept, manager_id, status, password_hash, password_salt, must_change_password, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       email,
       `${role} ${id.slice(0, 4)}`,
       role,
+      positionId,
       deptName,
       opts.managerId ?? null,
       opts.status ?? "active",
@@ -61,5 +91,5 @@ export async function makeUser(
     )
     .run();
   const token = await createSession(env.DB, id, "test");
-  return { id, email, password, cookie: `lux_session=${token}` };
+  return { id, email, password, cookie: `lux_session=${token}`, positionId };
 }

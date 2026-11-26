@@ -219,21 +219,25 @@ describe("GET /api/leave", () => {
     expect(body.balance.Casual.used).toBe(0);
   });
 
-  it("team: manager sees reports only; others 403", async () => {
+  it("team: same department or reports, never my own; leave=own positions get 403", async () => {
     const mgr = await makeUser("manager", OPS);
-    const mgr2 = await makeUser("manager", OPS);
-    const mine = await makeUser("employee", OPS, { managerId: mgr.id });
-    const theirs = await makeUser("employee", OPS, { managerId: mgr2.id });
+    const mgr2 = await makeUser("manager", "Finance");
+    const mine = await makeUser("employee", "Marketing", { managerId: mgr.id });
+    const sameDept = await makeUser("employee", OPS, { managerId: mgr2.id });
+    const theirs = await makeUser("employee", "Finance", { managerId: mgr2.id });
     await apply(mine, {});
+    await apply(sameDept, {});
     await apply(theirs, {});
+    await apply(mgr, {});
     const res = await api(mgr.cookie, "GET", "/api/leave?scope=team");
     expect(res.status).toBe(200);
     const { requests } = (await res.json()) as any;
-    expect(requests.map((r: any) => r.userId)).toEqual([mine.id]);
+    expect(requests.map((r: any) => r.userId).sort()).toEqual([mine.id, sameDept.id].sort());
     expect(requests[0].userName).toBeTruthy();
-    for (const role of ["employee", "hr", "admin"] as const) {
-      const u = await makeUser(role, OPS);
-      expect((await api(u.cookie, "GET", "/api/leave?scope=team")).status).toBe(403);
+    expect((await api((await makeUser("employee", OPS)).cookie, "GET", "/api/leave?scope=team")).status).toBe(403);
+    // leave=all (HR starter, admin) may open the team tab too.
+    for (const role of ["hr", "admin"] as const) {
+      expect((await api((await makeUser(role, OPS)).cookie, "GET", "/api/leave?scope=team")).status).toBe(200);
     }
   });
 
@@ -283,10 +287,16 @@ describe("decisions", () => {
     expect((await api(peer.cookie, "POST", `/api/leave/${id}/approve`, {})).status).toBe(403);
   });
 
-  it("a manager who is not the requester's manager cannot approve", async () => {
+  it("a team-level manager outside the requester's department and line cannot approve", async () => {
     const { id } = await setup();
-    const other = await makeUser("manager", OPS);
+    const other = await makeUser("manager", "Finance");
     expect((await api(other.cookie, "POST", `/api/leave/${id}/approve`, {})).status).toBe(403);
+  });
+
+  it("a team-level manager in the requester's department can approve", async () => {
+    const { id } = await setup();
+    const sameDept = await makeUser("manager", OPS);
+    expect((await api(sameDept.cookie, "POST", `/api/leave/${id}/approve`, {})).status).toBe(200);
   });
 
   it("hr and admin approve anyone's; reject notifies with leave_rejected", async () => {
