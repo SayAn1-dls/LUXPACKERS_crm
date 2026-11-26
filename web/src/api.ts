@@ -19,12 +19,15 @@ export interface ApiHooks {
   onUnauthorized?: () => void;
   /** Called on 403 must_change_password. */
   onMustChangePassword?: () => void;
+  /** Called on 403 mfa_setup_required (an admin who has not turned on two-step sign-in yet). */
+  onMfaSetupRequired?: () => void;
 }
 
 const hooks: ApiHooks = {};
 export function setApiHooks(next: ApiHooks) {
   hooks.onUnauthorized = next.onUnauthorized;
   hooks.onMustChangePassword = next.onMustChangePassword;
+  hooks.onMfaSetupRequired = next.onMfaSetupRequired;
 }
 
 const FALLBACK = "Something went wrong. Please try again.";
@@ -56,6 +59,8 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
     if (p !== "/login" && p !== "/setup") hooks.onUnauthorized?.();
   } else if (res.status === 403 && code === "must_change_password") {
     hooks.onMustChangePassword?.();
+  } else if (res.status === 403 && code === "mfa_setup_required") {
+    hooks.onMfaSetupRequired?.();
   }
   throw new ApiError(res.status, code, message, typeof obj.field === "string" ? obj.field : undefined);
 }

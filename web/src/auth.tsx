@@ -55,6 +55,10 @@ export function AuthProvider({ children }: { children?: ReactNode }) {
         setUser((u) => (u ? { ...u, mustChangePassword: true } : u));
         navigate("/change-password", { replace: true });
       },
+      onMfaSetupRequired: () => {
+        setUser((u) => (u ? { ...u, mfaEnabled: false } : u));
+        navigate("/account/two-step", { replace: true });
+      },
     });
     void refresh();
     return () => setApiHooks({});

@@ -36,6 +36,12 @@ npm install
 npm run db:migrate:local
 ```
 
+Make the local two-step sign-in key (once). This writes a `.dev.vars` file, which git ignores:
+
+```bash
+echo "MFA_KEY=$(openssl rand -base64 32)" > .dev.vars
+```
+
 ```bash
 npm run dev
 ```
@@ -44,7 +50,7 @@ Open the address it prints (usually `http://localhost:5173`).
 
 Run `db:migrate:local` **before** `dev` on a fresh copy. It creates the empty database on your computer, and the site cannot start properly without it. You only need to repeat it when new files appear in `worker/migrations`.
 
-The very first visit goes to a **setup** page. Create the first administrator there (name, email, password). That page only works once; after that everyone signs in normally.
+The very first visit goes to a **setup** page. Create the first administrator there (name, email, password). That page only works once; after that everyone signs in normally. Administrators are then asked to turn on two-step sign-in (see below) before they can do anything else.
 
 ---
 
@@ -116,6 +122,14 @@ Create the tables in the live database:
 npx wrangler d1 migrations apply luxcrm --remote
 ```
 
+Give the live site its two-step sign-in key. It encrypts everyone's authenticator secrets, so set it once and keep it. When it asks for the value, paste the output of `openssl rand -base64 32`:
+
+```bash
+npx wrangler secret put MFA_KEY
+```
+
+Without it, two-step sign-in cannot be turned on or used, and administrators cannot get past the setup screen. **Do not change or delete it later:** everyone who has two-step sign-in on would have to have it reset.
+
 Build and publish the site:
 
 ```bash
@@ -127,6 +141,27 @@ When it finishes it prints a `workers.dev` address. Open the address and finish 
 **Check sign-in speed on the live site.** Passwords are checked with a deliberately slow calculation, and the free plan gives each request a small CPU allowance. Time a real sign-in once after the first deploy. If Cloudflare reports CPU-limit errors (in the dashboard under the Worker's Logs), either lower the iteration count in `worker/src/lib/crypto.ts` (existing passwords keep working because every hash records the iteration count it was made with; new and changed passwords use the new count) or move to Workers Paid.
 
 **Later updates:** run `npm run deploy` again. If a new file has appeared in `worker/migrations`, run the `migrations apply luxcrm --remote` command first. Your records are never touched by a deploy.
+
+---
+
+## Two-step sign-in
+
+After the password, people with two-step sign-in on also type a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password and so on).
+
+- **Turn it on:** open **My account** (bottom of the menu) → **Turn on two-step sign-in**. Scan the QR code (or type the key shown under it), then type the code the app shows. Eight **backup codes** are shown once: copy or download them and keep them away from the phone. Each works once instead of an app code.
+- **Administrators must have it on.** An admin without it can only reach the setup screen until it is done, and cannot turn it off.
+- **Everyone else** may turn it off from **My account** with their password and a current code.
+- **New backup codes** can be made from **My account** with a current app code; the old ones stop working.
+- **Lost phone:** sign in with a backup code, or ask an administrator to press **Reset two-step sign-in** next to your name on **People & logins**. That clears it and signs you out everywhere; turn it on again afterwards. Resets are recorded in the audit log.
+- Wrong codes count toward the same 15-minute sign-in lockout as wrong passwords, and the code step expires 5 minutes after the password step.
+
+**Locked-out administrator (no phone, no backup codes, no other admin).** Clear two-step sign-in for that one email straight in the database, then sign in with just the password and set it up again at once:
+
+```bash
+npx wrangler d1 execute luxcrm --remote --command "UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = NULL WHERE email = 'admin@example.com'; DELETE FROM mfa_backup_codes WHERE user_id = (SELECT id FROM users WHERE email = 'admin@example.com'); DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = 'admin@example.com');"
+```
+
+Use the real email (lower case) in all three places. Anyone who can run this already controls the Cloudflare account, so keep that account itself behind two-step sign-in too.
 
 ---
 
@@ -152,6 +187,7 @@ To check everything still works after a change, run `npm test`.
 - Passwords are never stored as typed; only a scrambled (hashed) version is kept.
 - Sign-in lasts 14 days and is kept in a secure cookie that scripts on the page cannot read.
 - The server checks permissions on **every** request, so hiding a button is never the only protection.
-- After 5 wrong passwords for an email within 15 minutes, sign-in for that email is blocked until the oldest of those tries is 15 minutes old.
+- After 5 wrong passwords for an email within 15 minutes, sign-in for that email is blocked until the oldest of those tries is 15 minutes old. Wrong two-step codes count too.
+- Two-step sign-in secrets are stored encrypted with the `MFA_KEY` secret; backup codes are stored only as hashes. Administrators must use two-step sign-in.
 - **Never store passwords, OTPs, card numbers or passport scans in the CRM.** The Access register records only who holds a login and where it is kept.
 - When someone leaves, press **Disable** next to their name on the **Users** page. They are signed out immediately and cannot sign in again.

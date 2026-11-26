@@ -50,6 +50,7 @@ function LoginAdmin() {
   const [editId, setEditId] = useState<string | null>(null);
   const [pwFor, setPwFor] = useState<PersonRow | null>(null);
   const [disabling, setDisabling] = useState<PersonRow | null>(null);
+  const [resetting, setResetting] = useState<PersonRow | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const q = useQuery({ queryKey: ["users"], queryFn: () => api<{ users: PersonRow[] }>("GET", "/users") });
   const all = q.data?.users ?? [];
@@ -70,6 +71,20 @@ function LoginAdmin() {
     }
   }
 
+  async function resetMfa(p: PersonRow) {
+    setBusy(p.id);
+    setResetting(null);
+    try {
+      await api("POST", `/users/${p.id}/mfa/reset`);
+      notify(`Two-step sign-in reset for ${p.name}. They have been signed out everywhere.`);
+    } catch (e) {
+      notify(errorText(e), true);
+    } finally {
+      await refresh();
+      setBusy(null);
+    }
+  }
+
   return (
     <>
       <div className="page-head">
@@ -77,7 +92,7 @@ function LoginAdmin() {
           <div className="eyebrow">Admin</div>
           <h1>People &amp; logins</h1>
           <p>Add people, choose their position, change their work email and set new passwords.</p>
-          <p className="small">Passwords can't be viewed — only set. Setting a new one signs the person out everywhere.</p>
+          <p className="small">Passwords can't be viewed — only set. Setting a new one signs the person out everywhere. Administrators must use two-step sign-in.</p>
         </div>
         <div className="actions"><button type="button" className="btn" onClick={() => setAdding(true)}><Icon name="userPlus" size={16} />Add a person</button></div>
       </div>
@@ -90,6 +105,16 @@ function LoginAdmin() {
           </div>
         </div>
       )}
+      {resetting && (
+        <div className="notice red" role="alert">
+          Reset two-step sign-in for {resetting.name}? Their authenticator app and backup codes stop working and they're signed out everywhere.
+          {resetting.isAdmin ? " As an administrator, they'll have to set it up again when they next sign in." : " They can sign in with just their password until they turn it on again."}
+          <div className="actions" style={{ marginTop: 10 }}>
+            <button type="button" className="btn danger" onClick={() => void resetMfa(resetting)}>Yes, reset</button>
+            <button type="button" className="btn quiet" onClick={() => setResetting(null)}>Keep as it is</button>
+          </div>
+        </div>
+      )}
       <div className="card">
         {q.isPending ? (
           <Empty icon="key">Loading people…</Empty>
@@ -98,7 +123,7 @@ function LoginAdmin() {
         ) : (
           <div className="table-wrap">
             <table className="stack">
-              <thead><tr><th>Person</th><th>Position</th><th>Department</th><th>Manager</th><th>Status</th><th /></tr></thead>
+              <thead><tr><th>Person</th><th>Position</th><th>Department</th><th>Manager</th><th>Two-step</th><th>Status</th><th /></tr></thead>
               <tbody>
                 {all.map((p) => {
                   const self = p.id === user?.id;
@@ -112,11 +137,13 @@ function LoginAdmin() {
                       <td data-l="Position">{positionLabel(p)}</td>
                       <td data-l="Department">{p.dept}</td>
                       <td data-l="Manager">{(p.managerId && byId.get(p.managerId)?.name) || <span className="muted">None</span>}</td>
+                      <td data-l="Two-step">{p.mfaEnabled ? <Pill tone="done">On</Pill> : <Pill tone={p.isAdmin && !left ? "alert" : "muted"}>Off</Pill>}</td>
                       <td data-l="Status"><Pill tone={STATUS_TONE[p.status]}>{STATUS_LABEL[p.status]}</Pill></td>
                       <td>
                         <div className="actions row-actions">
                           <button type="button" className="btn quiet sm" onClick={() => setEditId(p.id)}>Edit</button>
                           {!self && !left && <button type="button" className="btn quiet sm" disabled={busy === p.id} onClick={() => setPwFor(p)}>Set a new password</button>}
+                          {!self && p.mfaEnabled && <button type="button" className="btn quiet sm" disabled={busy === p.id} onClick={() => setResetting(p)}>Reset two-step sign-in</button>}
                           {!self && !left && <button type="button" className="btn quiet sm" disabled={busy === p.id} onClick={() => setDisabling(p)}>Turn off</button>}
                           {left && <button type="button" className="btn quiet sm" disabled={busy === p.id} onClick={() => void setStatus(p, "active", `${p.name} can sign in again.`)}>Turn back on</button>}
                         </div>

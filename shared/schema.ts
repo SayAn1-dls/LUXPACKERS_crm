@@ -329,4 +329,8 @@ export interface Me {
   isAdmin: boolean;
   /** Effective permissions (an admin gets every permission at its highest level). */
   perms: Perms;
+  /** Two-step sign-in (authenticator app) is on. */
+  mfaEnabled: boolean;
+  /** Two-step sign-in is compulsory for this person (admins). */
+  mfaRequired: boolean;
 }

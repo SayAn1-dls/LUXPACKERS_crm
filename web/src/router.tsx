@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./auth";
 import { NotFound } from "./components/Placeholder";
 import { Shell } from "./components/Shell";
 import { ChangePassword } from "./pages/ChangePassword";
+import { Account } from "./pages/Account";
 import { Audit } from "./pages/Audit";
 import { Help } from "./pages/Help";
 import { Home } from "./pages/Home";
@@ -16,6 +17,7 @@ import { Settings } from "./pages/Settings";
 import { Setup } from "./pages/Setup";
 import { Tasks } from "./pages/Tasks";
 import { Trash } from "./pages/Trash";
+import { TwoStepSetup } from "./pages/TwoStepSetup";
 import { Users } from "./pages/Users";
 import { useSetupNeeded } from "./lib/setupStatus";
 
@@ -29,6 +31,7 @@ function RequireAuth() {
     return setup.data?.needed ? <Navigate to="/setup" replace /> : <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
   if (user.mustChangePassword) return <Navigate to="/change-password" replace />;
+  if (user.mfaRequired && !user.mfaEnabled) return <Navigate to="/account/two-step" replace />;
   return <Shell />;
 }
 
@@ -45,7 +48,13 @@ export const router = createBrowserRouter([
     children: [
       { path: "login", element: <Login /> },
       { path: "setup", element: <Setup /> },
-      { element: <RequireUser />, children: [{ path: "change-password", element: <ChangePassword /> }] },
+      {
+        element: <RequireUser />,
+        children: [
+          { path: "change-password", element: <ChangePassword /> },
+          { path: "account/two-step", element: <TwoStepSetup /> },
+        ],
+      },
       {
         element: <RequireAuth />,
         children: [
@@ -61,6 +70,7 @@ export const router = createBrowserRouter([
           { path: "settings", element: <Settings /> },
           { path: "trash", element: <Trash /> },
           { path: "help", element: <Help /> },
+          { path: "account", element: <Account /> },
           { path: "*", element: <NotFound /> },
         ],
       },

@@ -75,6 +75,7 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
           </div>
         </div>
         <div className="side-links">
+          <NavLink to="/account" end onClick={onNavigate}><Icon name="lock" size={16} />My account</NavLink>
           <NavLink to="/help" onClick={onNavigate}><Icon name="help" size={16} />How to use</NavLink>
           <button type="button" onClick={() => void signOut()}><Icon name="signOut" size={16} />Sign out</button>
         </div>

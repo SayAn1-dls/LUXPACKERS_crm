@@ -468,3 +468,16 @@ fieldset:disabled .seg span{opacity:.6;cursor:default}
   .topbar{gap:10px;padding:10px 14px}
   .topbar .spacer{display:none}
 }
+
+/* ---------- my account and two-step sign-in ---------- */
+.account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
+.account-grid h2{margin-bottom:12px}
+.account-grid p{margin:0 0 16px}
+.inline-form{margin-top:8px;padding-top:16px;border-top:2px dashed var(--line)}
+.qr{display:grid;place-items:center;width:224px;height:224px;margin:0 auto 16px;background:var(--white);border:var(--border);border-radius:var(--r-sm);box-shadow:var(--shadow-sm)}
+.qr img{display:block;width:200px;height:200px;image-rendering:pixelated}
+.secret-key{display:block;font:700 16px/1.5 ui-monospace,Menlo,monospace;letter-spacing:.06em;background:var(--sun-pale);border:3px dashed var(--ink);border-radius:var(--r-sm);padding:10px 14px;user-select:all;overflow-wrap:anywhere}
+.code-input{font:700 22px/1 ui-monospace,Menlo,monospace;letter-spacing:.2em}
+.backup-codes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;list-style:none;margin:12px 0;padding:0}
+.backup-codes code{display:block;text-align:center;font:700 17px/1 ui-monospace,Menlo,monospace;letter-spacing:.06em;background:var(--white);border:var(--border-thin);border-radius:var(--r-sm);padding:10px 8px;user-select:all}
+@media (max-width:900px){.account-grid{grid-template-columns:minmax(0,1fr)}}

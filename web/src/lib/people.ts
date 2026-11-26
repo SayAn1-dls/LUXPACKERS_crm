@@ -7,6 +7,10 @@ export interface PersonRow {
   id: string; name: string; role: RoleName; dept: string; title: string | null; phone: string | null; email: string;
   positionId: string | null; positionName: string | null;
   managerId: string | null; status: "active" | "onboarding" | "left";
+  /** Only in the admin's People & logins list. */
+  mfaEnabled?: boolean;
+  /** Only in the admin's People & logins list. */
+  isAdmin?: boolean;
   /** Only sent to people who may see private fields (admin, people = full). */
   joinedOn?: string | null; kind?: string | null;
 }
