@@ -36,10 +36,22 @@ export function Icon({ name, size = 18, className }: { name: IconName; size?: nu
   );
 }
 
-/** Friendly empty state: an icon in a soft circle, a short title and one line. */
+/** A little hand-drawn flight path: decoration for empty states. */
+export function Doodle() {
+  return (
+    <svg className="doodle" viewBox="0 0 132 72" aria-hidden="true" focusable="false">
+      <circle cx="108" cy="22" r="13" fill="#FFC72C" stroke="#111111" strokeWidth="3" />
+      <path d="M8 60 C30 30 52 70 74 44 S100 20 112 40" fill="none" stroke="#111111" strokeWidth="3" strokeDasharray="6 6" strokeLinecap="round" />
+      <path d="M10 18 l4 9 9 4 -9 4 -4 9 -4 -9 -9 -4 9 -4 z" fill="#D62718" stroke="#111111" strokeWidth="2.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Friendly empty state: a doodle, an icon sticker, a short title and one line. */
 export function Empty({ icon = "inbox", title, children }: { icon?: IconName; title?: string; children?: React.ReactNode }) {
   return (
     <div className="empty">
+      <Doodle />
       <span className="empty-icon"><Icon name={icon} size={22} /></span>
       {title && <h3>{title}</h3>}
       {children}

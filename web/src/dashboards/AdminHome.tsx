@@ -65,6 +65,29 @@ function NeedsOwner({ d }: { d: Dash["needsOwner"] }) {
   );
 }
 
+/** A CSS-only scrolling strip of today's numbers. Decorative: the same figures are below. */
+function Ticker({ f }: { f: Dash["figures"] }) {
+  const items: [string, string][] = [
+    [String(f.openTasks), "open tasks"],
+    [String(f.late), "overdue"],
+    [String(f.waiting), "waiting on someone"],
+    [String(f.openEnquiries), "open enquiries"],
+    [moneyShort(f.receivedThisMonth), "received this month"],
+    [`${f.tripsLive}/${f.tripsTotal}`, "trips live"],
+    ["", "Not just a trip. An experience."],
+  ];
+  const list = (hidden: boolean) => (
+    <ul aria-hidden={hidden || undefined}>
+      {items.map(([n, l]) => <li key={l}>{n && <b>{n}</b>}{l}</li>)}
+    </ul>
+  );
+  return (
+    <div className="ticker" aria-hidden="true">
+      <div className="ticker-track">{list(false)}{list(true)}</div>
+    </div>
+  );
+}
+
 export function AdminHome() {
   const { user } = useAuth();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -96,6 +119,8 @@ export function AdminHome() {
           {f && <p>{f.openTasks} open tasks across the company{f.late ? `, ${f.late} overdue` : ", none overdue"}. {f.tripsLive} of {f.tripsTotal} trips are live on the website.</p>}
         </div>
       </div>
+
+      {f && <Ticker f={f} />}
 
       <div className="big-actions">
         <button type="button" className="big-action" onClick={() => setAdding(true)}>

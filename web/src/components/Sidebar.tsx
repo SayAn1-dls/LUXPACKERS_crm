@@ -53,12 +53,12 @@ export function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () =>
       </div>
       <nav aria-label="Main menu" className="nav-wrap">
         {navFor(user).map((g) => (
-          <div className="nav-group" key={g.title}>
+          <div className={`nav-group g-${g.title.toLowerCase()}`} key={g.title}>
             <div className="nav-title">{g.title}</div>
             <div className="nav">
               {g.items.map((it) => (
                 <NavLink key={it.to} to={it.to} end={it.end} onClick={onNavigate}>
-                  <Icon name={it.icon} />
+                  <span className="nav-ico"><Icon name={it.icon} size={16} /></span>
                   <span>{it.label}</span>
                 </NavLink>
               ))}

@@ -76,7 +76,7 @@ export function Leave() {
           ) : q.isError ? (
             <div className="empty"><h3>Could not load leave</h3><p>Refresh the page to try again.</p></div>
           ) : rows.length === 0 ? (
-            <div className="empty">{others ? "No leave requests to show." : "You haven't asked for any leave yet."}</div>
+            <div className="empty">{others ? "No leave requests to show." : "No leave yet. Everyone needs a break — ask for one below."}</div>
           ) : (
             <div className="table-wrap">
               <table className="stack">
