@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FieldDef, RegisterDef } from "../../../shared/schema";
 import { fmtDay } from "../lib/tasks";
+import { Icon } from "./Icon";
 import { NO_OWNER, fieldOf, isLate, isOpen, money, safeLink, toneOf, valueOf } from "../lib/registers";
 import type { RecordLink, RegisterRecord } from "../lib/registers";
 
@@ -181,6 +182,7 @@ export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busy
       {shown.length === 0 ? (
         rows.length === 0 ? (
           <div className="empty">
+            <span className="empty-icon"><Icon name="folder" size={22} /></span>
             <h3>No {reg.name.toLowerCase()} yet</h3>
             {onNew ? (
               <>

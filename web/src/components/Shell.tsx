@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { longDate } from "../lib/useTitle";
+import { Icon } from "./Icon";
 import { NotificationBell } from "./NotificationBell";
 import { Search } from "./Search";
 import { Sidebar } from "./Sidebar";
@@ -28,7 +29,7 @@ export function Shell() {
       <div className="main">
         <header className="topbar">
           <button type="button" className="btn quiet menu-btn" aria-expanded={open} aria-controls="side" onClick={() => setOpen((o) => !o)}>
-            Menu
+            <Icon name="menu" size={18} />Menu
           </button>
           <Search />
           <span className="spacer" />
