@@ -11,7 +11,7 @@ interface Page { items: AuditItem[]; next: string | null }
 
 export function Audit() {
   const { user } = useAuth();
-  if (user?.role !== "admin") return <Placeholder title="Audit log" eyebrow="Administrator" note="You don't have access to this page." />;
+  if (!user?.isAdmin) return <Placeholder title="Audit log" eyebrow="Administrator" note="You don't have access to this page." />;
   return <AuditLog />;
 }
 

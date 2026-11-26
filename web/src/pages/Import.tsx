@@ -24,7 +24,7 @@ const SHOWN_WARNINGS = 50;
 
 export function Import() {
   const { user } = useAuth();
-  if (user?.role !== "admin") return <Placeholder title="Import" eyebrow="Administrator" note="You don't have access to this page." />;
+  if (!user?.isAdmin) return <Placeholder title="Import" eyebrow="Administrator" note="You don't have access to this page." />;
   return <ImportFlow />;
 }
 

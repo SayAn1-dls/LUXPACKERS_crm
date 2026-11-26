@@ -5,6 +5,7 @@ import { useAuth } from "../auth";
 import { LeaveForm } from "../components/LeaveForm";
 import { Pill } from "../components/Pill";
 import { daysText, useLeaveActions } from "../lib/leave";
+import { leaveLevel } from "../lib/perms";
 import type { Balance, LeaveRequest } from "../lib/leave";
 import { fmtDay } from "../lib/tasks";
 import { useTitle } from "../lib/useTitle";
@@ -17,10 +18,11 @@ const range = (l: LeaveRequest) => `${fmtDay(l.start)}${l.end !== l.start ? ` to
 export function Leave() {
   const { user } = useAuth();
   useTitle("Leave");
+  const level = user ? leaveLevel(user) : "own";
   const approverTab: { scope: Scope; label: string } | null =
-    user?.role === "manager" ? { scope: "team", label: "My team" } : user?.role === "hr" || user?.role === "admin" ? { scope: "all", label: "Everyone" } : null;
+    level === "team" ? { scope: "team", label: "My team" } : level === "all" ? { scope: "all", label: "Everyone" } : null;
   const [params, setParams] = useSearchParams();
-  // ?tab= comes from notification links; a tab this role can't use falls back to "My leave".
+  // ?tab= comes from notification links; a tab this position can't use falls back to "My leave".
   const asked = params.get("tab");
   const current: Scope = approverTab && asked === approverTab.scope ? approverTab.scope : "mine";
   const setScope = (s: Scope) => setParams((p) => { const n = new URLSearchParams(p); n.set("tab", s); return n; }, { replace: true });

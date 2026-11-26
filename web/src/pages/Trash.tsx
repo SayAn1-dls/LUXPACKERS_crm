@@ -11,7 +11,7 @@ import { useTitle } from "../lib/useTitle";
 
 export function Trash() {
   const { user } = useAuth();
-  if (user?.role !== "admin") return <Placeholder title="Trash" eyebrow="Administrator" note="You don't have access to this page." />;
+  if (!user?.isAdmin) return <Placeholder title="Trash" eyebrow="Administrator" note="You don't have access to this page." />;
   return <TrashList />;
 }
 

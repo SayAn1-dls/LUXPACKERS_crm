@@ -8,7 +8,8 @@ interface Props {
   register: RegisterDef;
   rows: RegisterRecord[];
   onOpen: (id: string) => void;
-  onNew: () => void;
+  /** Null when the person may only look (register level "view"). */
+  onNew: (() => void) | null;
   /** Quick status change from the table. */
   onStatus: (row: RegisterRecord, value: string) => void;
   /** Row id whose status is being saved. */
@@ -23,7 +24,7 @@ interface Sort { key: string; dir: "asc" | "desc" }
 const NUMERIC = ["money", "number", "computed"];
 const SEARCHABLE = ["text", "textarea", "email", "select", "person"];
 
-function Cell({ reg, r, k, first, busy, onStatus }: { reg: RegisterDef; r: RegisterRecord; k: string; first: boolean; busy: boolean; onStatus: (v: string) => void }) {
+function Cell({ reg, r, k, first, busy, onStatus }: { reg: RegisterDef; r: RegisterRecord; k: string; first: boolean; busy: boolean; onStatus: ((v: string) => void) | null }) {
   const fd: FieldDef = fieldOf(reg, k) ?? { key: k, label: k, type: "text" };
   const label = fd.label;
   const v = valueOf(r, k);
@@ -39,6 +40,7 @@ function Cell({ reg, r, k, first, busy, onStatus }: { reg: RegisterDef; r: Regis
   if (first) return <td data-l={label} className="nowrap">{fd.type === "date" ? fmtDay(v || null) : v ?? ""}</td>;
   switch (fd.type) {
     case "status":
+      if (!onStatus) return <td data-l={label}>{v ? <span className={`pill tone-${toneOf(reg, v)}`}>{v}</span> : null}</td>;
       return (
         <td data-l={label} onClick={(e) => e.stopPropagation()}>
           <select
@@ -180,8 +182,12 @@ export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busy
         rows.length === 0 ? (
           <div className="empty">
             <h3>No {reg.name.toLowerCase()} yet</h3>
-            <p>Add the first {reg.singular} and it will appear here for the whole team.</p>
-            <button type="button" className="btn" onClick={onNew}>New {reg.singular}</button>
+            {onNew ? (
+              <>
+                <p>Add the first {reg.singular} and it will appear here for the whole team.</p>
+                <button type="button" className="btn" onClick={onNew}>New {reg.singular}</button>
+              </>
+            ) : <p>Nothing has been added here yet.</p>}
           </div>
         ) : (
           <div className="empty"><p>Nothing matches these filters.</p><button type="button" className="btn quiet" onClick={clear}>Clear filters</button></div>
@@ -209,7 +215,7 @@ export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busy
                   onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) onOpen(r.id); }}
                 >
                   {reg.columns.map((k, i) => (
-                    <Cell key={k} reg={reg} r={r} k={k} first={i === 0} busy={busyId === r.id} onStatus={(v) => onStatus(r, v)} />
+                    <Cell key={k} reg={reg} r={r} k={k} first={i === 0} busy={busyId === r.id} onStatus={onNew ? (v) => onStatus(r, v) : null} />
                   ))}
                 </tr>
               ))}

@@ -5,6 +5,7 @@ import { TASK_STATUSES } from "../../../shared/schema";
 import type { Task, TaskStatus } from "../../../shared/schema";
 import { ApiError } from "../api";
 import type { User } from "../auth";
+import { inTeam, taskLevel } from "./perms";
 
 export type { Task, TaskComment, TaskStatus } from "../../../shared/schema";
 
@@ -15,9 +16,8 @@ export const CONFLICT_MESSAGE = "Someone else changed this. Reload to see their 
 /** Mirrors the server's canAssignTo. The server checks again. */
 export function canAssignTo(u: User, p: Person): boolean {
   if (p.id === u.id) return true;
-  if (u.role === "admin" || u.role === "hr") return true;
-  if (u.role === "manager") return p.dept === u.dept || p.managerId === u.id;
-  return false;
+  const level = taskLevel(u);
+  return level === "all" || (level === "team" && inTeam(u, p.dept, p.managerId));
 }
 
 export const assignablePeople = (u: User, people: Person[]) => people.filter((p) => p.status !== "left" && canAssignTo(u, p));
@@ -45,7 +45,7 @@ export function taskPerms(u: User, t: Task, people: Person[]): TaskPerms {
   const assigneeManager = people.find((p) => p.id === t.assigneeId)?.managerId ?? null;
   const approver =
     !isAssignee &&
-    (u.role === "admin" || assigner || (u.role === "manager" && (t.dept === u.dept || (assigneeManager !== null && assigneeManager === u.id))));
+    (taskLevel(u) === "all" || assigner || (taskLevel(u) === "team" && inTeam(u, t.dept, assigneeManager)));
 
   const allowed = (s: TaskStatus) => approver || (isAssignee && (s !== "Done" || selfTask));
   const lockedDone = t.status === "Done" && !selfTask && !approver;

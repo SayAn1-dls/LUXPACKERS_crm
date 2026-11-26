@@ -12,7 +12,7 @@ const KINDS = ["Casual", "Sick", "Earned"] as const;
 
 export function Settings() {
   const { user } = useAuth();
-  if (user?.role !== "admin") return <Placeholder title="Settings" eyebrow="Administrator" note="You don't have access to this page." />;
+  if (!user?.isAdmin) return <Placeholder title="Settings" eyebrow="Administrator" note="You don't have access to this page." />;
   return <SettingsForm />;
 }
 

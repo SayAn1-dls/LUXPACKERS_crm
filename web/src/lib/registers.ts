@@ -1,7 +1,5 @@
 /* Register helpers shared by the table, the drawer and the pages. */
-import { registerDepts } from "../../../shared/schema";
 import type { FieldDef, RegisterDef, Tone } from "../../../shared/schema";
-import type { User } from "../auth";
 
 export interface RecordLink { label: string; url: string }
 
@@ -22,10 +20,6 @@ export interface RegisterRecord {
 export const NO_ACCESS = "You don't have access to this register.";
 export const NO_DELETE = "You can't delete in this register.";
 
-/** Mirrors canReadRegister / canWriteRegister on the server (it checks again). */
-export const canUseRegister = (u: User, id: string) => u.role === "admin" || registerDepts(id).includes(u.dept);
-/** Mirrors canDeleteRecord: admin, or a manager whose department owns the register. */
-export const canDeleteIn = (u: User, id: string) => canUseRegister(u, id) && (u.role === "admin" || u.role === "manager");
 
 export const fieldOf = (reg: RegisterDef, key: string): FieldDef | undefined => reg.fields.find((f) => f.key === key);
 
