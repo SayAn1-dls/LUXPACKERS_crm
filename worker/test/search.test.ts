@@ -19,14 +19,14 @@ describe("search", () => {
   });
 
   it("as employee never returns finance records", async () => {
-    const e = await makeUser("employee", "Operations");
+    const e = await makeUser("employee", "Operations", { perms: await permsLike("employee", { registers: { partners: "view" } }) });
     await seedRecord("finance", "Zebra invoice", { status: "Pending" });
     await seedRecord("partners", "Zebra hotel", { status: "Active" });
     const body = (await (await search(e, "zebra")).json()) as any;
     expect(body.results.map((r: any) => r.title)).toEqual(["Zebra hotel"]);
     // A Finance-dept Employee still cannot; a position with finance=view can (and without partners, sees only finance).
     const fe = await makeUser("employee", "Finance");
-    expect(((await (await search(fe, "zebra")).json()) as any).results.map((r: any) => r.title)).toEqual(["Zebra hotel"]);
+    expect(((await (await search(fe, "zebra")).json()) as any).results.map((r: any) => r.title)).toEqual([]);
     const f = await makeUser("employee", "Marketing", { perms: await permsLike("employee", { registers: { finance: "view", partners: "none" } }) });
     const fb = (await (await search(f, "zebra")).json()) as any;
     expect(fb.results.map((r: any) => r.title)).toEqual(["Zebra invoice"]);

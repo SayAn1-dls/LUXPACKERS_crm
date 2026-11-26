@@ -28,6 +28,11 @@ let positionSeq = 0;
 type Perms = import("../../shared/schema").Perms;
 type RegisterLevel = import("../../shared/schema").RegisterLevel;
 
+/** Register levels of a typical staff position (the starter Employee has none). */
+export const STAFF_REGISTERS: Record<string, RegisterLevel> = {
+  leads: "edit", bookings: "edit", trips: "edit", partners: "edit", content: "edit",
+};
+
 /** A starter position's perms with some keys (and register levels) overridden. */
 export async function permsLike(
   role: "manager" | "hr" | "employee",

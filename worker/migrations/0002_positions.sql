@@ -19,7 +19,7 @@ INSERT INTO positions (id, name, is_admin, perms, created_at, updated_at) VALUES
    '{"tasks":"own","registers":{"leads":"none","bookings":"none","trips":"none","finance":"none","partners":"none","content":"none","access":"none"},"leave":"all","people":"full","addPeople":true}',
    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ('pos_employee', 'Employee', 0,
-   '{"tasks":"own","registers":{"leads":"edit","bookings":"edit","trips":"edit","finance":"none","partners":"edit","content":"edit","access":"none"},"leave":"own","people":"basic","addPeople":false}',
+   '{"tasks":"own","registers":{"leads":"none","bookings":"none","trips":"none","finance":"none","partners":"none","content":"none","access":"none"},"leave":"own","people":"basic","addPeople":false}',
    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 ALTER TABLE users ADD COLUMN position_id TEXT REFERENCES positions(id);

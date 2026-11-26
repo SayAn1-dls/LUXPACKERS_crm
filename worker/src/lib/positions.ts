@@ -41,7 +41,8 @@ export const STARTER_POSITIONS: { id: string; name: string; isAdmin: boolean; ro
   },
   {
     id: EMPLOYEE_POSITION_ID, name: "Employee", isAdmin: false, role: "employee",
-    perms: { tasks: "own", registers: regs("edit", { finance: "none", access: "none" }), leave: "own", people: "basic", addPeople: false },
+    // Employees start with no registers; the admin grants them per position.
+    perms: { tasks: "own", registers: regs("none"), leave: "own", people: "basic", addPeople: false },
   },
 ];
 

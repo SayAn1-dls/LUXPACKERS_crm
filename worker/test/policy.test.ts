@@ -28,7 +28,7 @@ describe("register access by position (department no longer matters)", () => {
     admin: { leads: "manage", bookings: "manage", trips: "manage", finance: "manage", partners: "manage", content: "manage", access: "manage" },
     manager: { leads: "manage", bookings: "manage", trips: "manage", finance: "none", partners: "manage", content: "manage", access: "none" },
     hr: { leads: "none", bookings: "none", trips: "none", finance: "none", partners: "none", content: "none", access: "none" },
-    employee: { leads: "edit", bookings: "edit", trips: "edit", finance: "none", partners: "edit", content: "edit", access: "none" },
+    employee: { leads: "none", bookings: "none", trips: "none", finance: "none", partners: "none", content: "none", access: "none" },
   };
   for (const role of ROLES) {
     for (const [reg, level] of Object.entries(expected[role])) {
