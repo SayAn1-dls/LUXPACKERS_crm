@@ -4,34 +4,32 @@ import { DEPT_NAMES, EMPLOYEE_POSITION_ID } from "../../../shared/schema";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { errorText } from "../lib/errors";
-import { KINDS, MIN_PASSWORD, managerChoices, useRefreshPeople } from "../lib/people";
+import { KINDS, managerChoices, useRefreshPeople } from "../lib/people";
 import type { PersonRow } from "../lib/people";
 import { usePositions } from "../lib/positions";
 import { DrawerShell } from "./DrawerShell";
-import { PasswordInput } from "./PasswordInput";
-import { TempPassword } from "./TempPassword";
 import { useToast } from "./Toast";
 
 interface Draft {
   name: string; email: string; positionId: string; dept: string; managerId: string; title: string; phone: string;
-  kind: string; joinedOn: string; status: "onboarding" | "active"; password: string; mustChange: boolean;
+  kind: string; joinedOn: string; status: "onboarding" | "active";
 }
 const EMPTY: Draft = {
   name: "", email: "", positionId: EMPLOYEE_POSITION_ID, dept: "", managerId: "", title: "", phone: "",
-  kind: "Full-time", joinedOn: "", status: "onboarding", password: "", mustChange: true,
+  kind: "Full-time", joinedOn: "", status: "onboarding",
 };
 
-/** Create an account. The admin picks the position and may set the password; anyone else with "add people" adds an Employee. */
+/** Add someone ahead of time. They sign in with Google using this email and go straight in.
+    The admin picks the position; anyone else with "add people" adds an Employee. */
 export function AddPersonDrawer({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
   const notify = useToast();
   const refresh = useRefreshPeople();
   const isAdmin = !!user?.isAdmin;
   const [d, setD] = useState<Draft>(EMPTY);
-  const [generated, setGenerated] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<keyof Draft, string>>>({});
   const [busy, setBusy] = useState(false);
-  const [made, setMade] = useState<{ name: string; password: string | null; mustChange: boolean } | null>(null);
+  const [made, setMade] = useState<{ name: string; email: string } | null>(null);
   const peopleQ = useQuery({ queryKey: ["people"], queryFn: () => api<{ people: PersonRow[] }>("GET", "/people"), staleTime: 5 * 60_000 });
   const positionsQ = usePositions(isAdmin);
   const managers = managerChoices(peopleQ.data?.people ?? [], null);
@@ -46,7 +44,6 @@ export function AddPersonDrawer({ onClose }: { onClose: () => void }) {
     if (!d.name.trim()) errs.name = "Please fill this in.";
     if (!/^\S+@\S+\.\S+$/.test(d.email.trim())) errs.email = "Enter a full work email address.";
     if (!d.dept) errs.dept = "Choose a department.";
-    if (isAdmin && d.password && d.password.length < MIN_PASSWORD) errs.password = `Use at least ${MIN_PASSWORD} characters, or press Generate.`;
     if (Object.keys(errs).length) {
       setErrors(errs);
       return notify("Please fix the highlighted fields.", true);
@@ -57,15 +54,10 @@ export function AddPersonDrawer({ onClose }: { onClose: () => void }) {
         name: d.name.trim(), email: d.email.trim(), dept: d.dept, managerId: d.managerId || null, title: d.title.trim() || null,
         phone: d.phone.trim() || null, kind: d.kind, joinedOn: d.joinedOn || null, status: d.status,
       };
-      if (isAdmin) {
-        body.positionId = d.positionId;
-        body.mustChangePassword = d.mustChange;
-        if (d.password) body.password = d.password;
-      }
-      const res = await api<{ tempPassword?: string }>("POST", "/users", body);
+      if (isAdmin) body.positionId = d.positionId;
+      const res = await api<{ user: { email: string } }>("POST", "/users", body);
       await refresh();
-      const shown = res.tempPassword ?? (generated ? d.password : null);
-      setMade({ name: d.name.trim(), password: shown, mustChange: isAdmin ? d.mustChange : true });
+      setMade({ name: d.name.trim(), email: res.user.email });
     } catch (e) {
       const code = e instanceof ApiError ? e.code : "";
       if (code === "email_taken") setErrors({ email: "That email already has an account." });
@@ -99,14 +91,14 @@ export function AddPersonDrawer({ onClose }: { onClose: () => void }) {
       }
     >
       {made ? (
-        made.password ? (
-          <TempPassword name={made.name} password={made.password} mustChange={made.mustChange} onDone={onClose} />
-        ) : (
-          <div className="notice" role="status"><b>{made.name} can sign in now</b> with their work email and the password you typed. Passwords can't be viewed later — only set.</div>
-        )
+        <div className="notice" role="status">
+          <b>{made.name} can sign in now.</b> Tell them to open the CRM and press <b>Continue with Google</b> with the Google account for <b>{made.email}</b>. They'll go straight in.
+        </div>
       ) : (
         <div className="form">
-          {!isAdmin && <p className="help wide" style={{ marginTop: 0 }}>They start as an Employee. A temporary password is made for them and shown once.</p>}
+          <p className="help wide" style={{ marginTop: 0 }}>
+            {isAdmin ? "" : "They start as an Employee. "}They sign in with Google using this work email, and go straight in.
+          </p>
           <div className="field">
             <label className="flabel" htmlFor="np_name">Full name *</label>
             <input id="np_name" className="input" value={d.name} onChange={(e) => set("name", e.target.value)} autoFocus {...bad("name")} />
@@ -168,20 +160,6 @@ export function AddPersonDrawer({ onClose }: { onClose: () => void }) {
               <option value="active">Already working here</option>
             </select>
           </div>
-          {isAdmin && (
-            <>
-              <PasswordInput
-                id="np_pw" value={d.password} error={errors.password}
-                hint={`Type one (at least ${MIN_PASSWORD} characters), press Generate, or leave it empty and one is made for you.`}
-                onChange={(v, gen) => { set("password", v); setGenerated(gen); }}
-              />
-              <label className="check wide">
-                <input type="checkbox" checked={d.mustChange} onChange={(e) => set("mustChange", e.target.checked)} />
-                Ask them to choose their own password at first sign-in
-              </label>
-              <p className="help wide" style={{ margin: "6px 0 0" }}>Passwords can't be viewed — only set.</p>
-            </>
-          )}
         </div>
       )}
     </DrawerShell>

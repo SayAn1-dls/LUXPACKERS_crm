@@ -51,9 +51,8 @@ export function AuthProvider({ children }: { children?: ReactNode }) {
         qc.clear();
         navigate("/login", { replace: true });
       },
-      onMustChangePassword: () => {
-        setUser((u) => (u ? { ...u, mustChangePassword: true } : u));
-        navigate("/change-password", { replace: true });
+      onApprovalPending: () => {
+        setUser((u) => (u ? { ...u, approval: "pending" } : u));
       },
       onMfaSetupRequired: () => {
         setUser((u) => (u ? { ...u, mfaEnabled: false } : u));

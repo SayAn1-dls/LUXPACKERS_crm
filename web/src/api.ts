@@ -17,8 +17,8 @@ export class ApiError extends Error {
 export interface ApiHooks {
   /** Called on any 401 (the session is gone). */
   onUnauthorized?: () => void;
-  /** Called on 403 must_change_password. */
-  onMustChangePassword?: () => void;
+  /** Called on 403 approval_pending (signed in with Google, not let in yet). */
+  onApprovalPending?: () => void;
   /** Called on 403 mfa_setup_required (an admin who has not turned on two-step sign-in yet). */
   onMfaSetupRequired?: () => void;
 }
@@ -26,7 +26,7 @@ export interface ApiHooks {
 const hooks: ApiHooks = {};
 export function setApiHooks(next: ApiHooks) {
   hooks.onUnauthorized = next.onUnauthorized;
-  hooks.onMustChangePassword = next.onMustChangePassword;
+  hooks.onApprovalPending = next.onApprovalPending;
   hooks.onMfaSetupRequired = next.onMfaSetupRequired;
 }
 
@@ -56,9 +56,9 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
 
   if (res.status === 401) {
     const p = window.location.pathname;
-    if (p !== "/login" && p !== "/setup") hooks.onUnauthorized?.();
-  } else if (res.status === 403 && code === "must_change_password") {
-    hooks.onMustChangePassword?.();
+    if (p !== "/login" && p !== "/setup" && p !== "/login/code") hooks.onUnauthorized?.();
+  } else if (res.status === 403 && code === "approval_pending") {
+    hooks.onApprovalPending?.();
   } else if (res.status === 403 && code === "mfa_setup_required") {
     hooks.onMfaSetupRequired?.();
   }

@@ -54,8 +54,9 @@ export function Help() {
         <h2>For the administrator</h2>
         <ul>
           <li><b>Positions:</b> open <b>Positions</b> under Admin, press <b>Create a position</b>, give it a name and choose what it can open. Changes reach everyone in that position straight away.</li>
-          <li><b>Adding someone:</b> open <b>People &amp; logins</b>, press <b>Add a person</b>, choose their position, and type or generate a password. Give it to them in person.</li>
-          <li><b>Forgotten password:</b> press <b>Set a new password</b> next to their name. It signs them out everywhere. Passwords can't be viewed — only set.</li>
+          <li><b>New people:</b> anyone can press <b>Continue with Google</b>. You get a notification, and they wait in <b>People &amp; logins → Waiting</b> until you press <b>Approve</b> and choose their position and department. <b>Decline</b> turns them away (you can undo it).</li>
+          <li><b>Adding someone ahead of time:</b> press <b>Add a person</b> with their work email. When they sign in with that Google account they go straight in.</li>
+          <li><b>Lost access:</b> sign-in is through Google, so passwords are reset in Google. If someone loses their authenticator phone, press <b>Reset two-step sign-in</b>.</li>
           <li>A position can only be deleted when no one is in it. Move the people first.</li>
         </ul>
         <h2>Two rules</h2>

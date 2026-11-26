@@ -481,3 +481,15 @@ fieldset:disabled .seg span{opacity:.6;cursor:default}
 .backup-codes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;list-style:none;margin:12px 0;padding:0}
 .backup-codes code{display:block;text-align:center;font:700 17px/1 ui-monospace,Menlo,monospace;letter-spacing:.06em;background:var(--white);border:var(--border-thin);border-radius:var(--r-sm);padding:10px 8px;user-select:all}
 @media (max-width:900px){.account-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- Continue with Google (Google's light button colours, the poster's border and shadow) ---------- */
+.g-btn{display:flex;align-items:center;justify-content:center;gap:14px;width:100%;min-height:58px;padding:12px 22px;border-radius:var(--r-sm);border:var(--border);background:#FFFFFF;color:#1F1F1F;font:500 17px/1.2 Roboto,"Helvetica Neue",Arial,sans-serif;letter-spacing:.01em;text-decoration:none;cursor:pointer;box-shadow:var(--shadow);transition:transform .08s var(--ease),box-shadow .08s var(--ease),background .12s}
+.g-btn:hover{background:#F8FAFF;transform:translate(-1px,-1px);box-shadow:6px 6px 0 var(--ink)}
+.g-btn:active{transform:translate(4px,4px);box-shadow:var(--shadow-press)}
+.g-btn:focus-visible{outline:var(--focus-ring);outline-offset:4px}
+.g-btn[aria-disabled=true],.g-btn[aria-disabled=true]:hover,.g-btn[aria-disabled=true]:active{opacity:.55;cursor:default;transform:none;box-shadow:var(--shadow-press)}
+.g-mark{flex:none}
+.login-card .g-btn + .small{margin-top:20px}
+.waiting-mark{display:inline-grid;place-items:center;width:64px;height:64px;margin:0 0 18px;border:var(--border);border-radius:50%;background:var(--sun);box-shadow:var(--shadow-sm);font:400 28px/1 var(--display)}
+.who{display:flex;align-items:center;gap:12px}
+.who .avatar{transform:none;border:var(--border-thin)}

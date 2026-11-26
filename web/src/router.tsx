@@ -2,7 +2,6 @@ import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router
 import { AuthProvider, useAuth } from "./auth";
 import { NotFound } from "./components/Placeholder";
 import { Shell } from "./components/Shell";
-import { ChangePassword } from "./pages/ChangePassword";
 import { Account } from "./pages/Account";
 import { Audit } from "./pages/Audit";
 import { Help } from "./pages/Help";
@@ -10,6 +9,7 @@ import { Home } from "./pages/Home";
 import { Import } from "./pages/Import";
 import { Leave } from "./pages/Leave";
 import { Login } from "./pages/Login";
+import { LoginCode } from "./pages/LoginCode";
 import { People } from "./pages/People";
 import { Positions } from "./pages/Positions";
 import { Register } from "./pages/Register";
@@ -19,9 +19,10 @@ import { Tasks } from "./pages/Tasks";
 import { Trash } from "./pages/Trash";
 import { TwoStepSetup } from "./pages/TwoStepSetup";
 import { Users } from "./pages/Users";
+import { Waiting } from "./pages/Waiting";
 import { useSetupNeeded } from "./lib/setupStatus";
 
-/** Signed-in area. Sends visitors to setup or sign-in, and forces a password change when required. */
+/** Signed-in area. Sends visitors to setup or sign-in; people waiting for approval see only the waiting page. */
 function RequireAuth() {
   const { user, loading } = useAuth();
   const setup = useSetupNeeded();
@@ -30,16 +31,17 @@ function RequireAuth() {
   if (!user) {
     return setup.data?.needed ? <Navigate to="/setup" replace /> : <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
-  if (user.mustChangePassword) return <Navigate to="/change-password" replace />;
+  if (user.approval !== "approved") return <Waiting />;
   if (user.mfaRequired && !user.mfaEnabled) return <Navigate to="/account/two-step" replace />;
   return <Shell />;
 }
 
-/** Change-password lives outside the shell but still needs a signed-in user. */
+/** Two-step enrolment lives outside the shell but still needs a signed-in user who has been let in. */
 function RequireUser() {
   const { user, loading } = useAuth();
   if (loading) return <div className="empty" style={{ paddingTop: "30vh" }}>Opening the Luxpackers desk…</div>;
-  return user ? <Outlet /> : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  return user.approval === "approved" ? <Outlet /> : <Waiting />;
 }
 
 export const router = createBrowserRouter([
@@ -47,11 +49,11 @@ export const router = createBrowserRouter([
     element: <AuthProvider />,
     children: [
       { path: "login", element: <Login /> },
+      { path: "login/code", element: <LoginCode /> },
       { path: "setup", element: <Setup /> },
       {
         element: <RequireUser />,
         children: [
-          { path: "change-password", element: <ChangePassword /> },
           { path: "account/two-step", element: <TwoStepSetup /> },
         ],
       },

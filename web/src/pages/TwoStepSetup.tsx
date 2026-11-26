@@ -5,6 +5,7 @@ import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { AuthLayout } from "../components/AuthLayout";
 import { BackupCodes } from "../components/BackupCodes";
+import { GoogleButton } from "../components/GoogleButton";
 import { useTitle } from "../lib/useTitle";
 
 type Step = { kind: "intro" } | { kind: "scan"; secret: string; uri: string } | { kind: "codes"; codes: string[] };
@@ -21,6 +22,7 @@ export function TwoStepSetup() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reauth, setReauth] = useState(false);
   const forced = !!user?.mfaRequired && !user.mfaEnabled;
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export function TwoStepSetup() {
       setStep({ kind: "scan", ...res });
     } catch (ex) {
       if (ex instanceof ApiError && ex.code === "already_enabled") await refresh();
+      else if (ex instanceof ApiError && ex.code === "reauth_required") setReauth(true);
       else setError(ex instanceof ApiError && ex.code === "mfa_not_configured" ? NOT_CONFIGURED : "Something went wrong. Please try again.");
     } finally {
       setBusy(false);
@@ -61,7 +64,8 @@ export function TwoStepSetup() {
       setStep({ kind: "codes", codes: res.backupCodes });
     } catch (ex) {
       setCode("");
-      if (ex instanceof ApiError && ex.code === "bad_code") setError("That code isn't right. Check the time on your phone, wait for a new code and try again.");
+      if (ex instanceof ApiError && ex.code === "reauth_required") setReauth(true);
+      else if (ex instanceof ApiError && ex.code === "bad_code") setError("That code isn't right. Check the time on your phone, wait for a new code and try again.");
       else if (ex instanceof ApiError && ex.code === "mfa_not_configured") setError(NOT_CONFIGURED);
       else setError("Something went wrong. Please try again.");
     } finally {
@@ -84,19 +88,25 @@ export function TwoStepSetup() {
     <AuthLayout>
       <div className="login-card">
         <h1>Two-step sign-in</h1>
-        {step.kind === "intro" && (
+        {reauth && step.kind !== "codes" && (
+          <>
+            <p>To keep your account safe, sign in with Google again first. You'll come straight back here.</p>
+            <GoogleButton next="two-step" />
+          </>
+        )}
+        {!reauth && step.kind === "intro" && (
           <>
             <p>
               {forced
                 ? "Administrators must turn this on before carrying on. "
                 : ""}
-              After your password, you'll also type a 6-digit code from an authenticator app on your phone, such as Google Authenticator.
+              After Google, you'll also type a 6-digit code from an authenticator app on your phone, such as Google Authenticator.
             </p>
             <div className="err" role="alert">{error}</div>
             <button type="button" className="btn block" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : "Turn on two-step sign-in"}</button>
           </>
         )}
-        {step.kind === "scan" && (
+        {!reauth && step.kind === "scan" && (
           <form onSubmit={confirm} noValidate>
             <p>1. In your authenticator app, add an account and scan this code.</p>
             <div className="qr">{qr ? <img src={qr} width={200} height={200} alt="QR code to add Luxpackers to your authenticator app" /> : <span className="small">Making the QR code…</span>}</div>

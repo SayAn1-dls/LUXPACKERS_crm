@@ -10,7 +10,12 @@ export function describe(a: AuditItem): string {
   const who = a.userName ?? "Someone";
   const t = q(a.title);
   switch (a.action) {
-    case "login": return `${who} signed in`;
+    case "login": return `${who} signed in${(a.detail as { method?: string } | null)?.method === "google" ? " with Google" : ""}`;
+    case "google_linked": return `${who} linked their Google account`;
+    case "access_requested": return `${a.title ?? "Someone"} asked to join`;
+    case "access_approved": return `${who} let ${a.title ?? "someone"} in`;
+    case "access_declined": return `${who} turned away ${a.title ?? "someone"}`;
+    case "access_decline_undone": return `${who} put ${a.title ?? "someone"} back in Waiting`;
     case "logout": return `${who} signed out`;
     case "setup": return `${who} set up the CRM`;
     case "password_change": return `${who} changed their password`;
