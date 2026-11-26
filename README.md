@@ -2,7 +2,7 @@
 
 The Luxpackers operations desk: one place for every task, enquiry, booking, trip, payment, partner, post and team member, for every department.
 
-Everyone signs in with their own email and password, and sees a home page made for their job: Admin, Manager, HR or Employee. It runs on Cloudflare's free plan (a Worker for the website and a D1 database for the records), so there is no server to look after.
+Everyone signs in with their own email and password, and sees a home page made for their job: Admin, Manager, HR or Employee. It runs on Cloudflare's free plan (a Worker for the website and a D1 database for the records), so there is no server to look after. A **Worker** is a small program Cloudflare runs for you whenever someone opens the site; **D1** is Cloudflare's hosted database; **migrations** are the numbered files in `worker/migrations` that create or change the database tables, applied once, in order.
 
 ---
 
@@ -64,14 +64,14 @@ Add the real people **before** importing the old data, so old owner names can be
 1. In the **old** CRM, open **Settings → Download backup**. Keep the file safe.
 2. In the new CRM, sign in as admin and open **Import**.
 3. Choose the backup file. Nothing is saved yet. You see a preview with the number of records of each kind.
-4. The old CRM used names like "CFO" or "Ops intern" as owners. The preview lists each one with a drop-down. Pick the real person for each. Any you leave unmatched are imported as **unassigned** and appear in a "needs an owner" list to sort out later.
+4. The old CRM used names like "CFO" or "Ops intern" as owners. The preview lists each one with a drop-down. Pick the real person for each. Any you leave unmatched are imported as **unassigned**. Admins see them in the **Needs an owner** section on their home page, which links to the open tasks with no one assigned (Tasks, All tab, owner "No owner") and, for each register, to the records with no owner (owner filter "No owner").
 5. Press **Import**.
 
 Importing never creates logins; people must already have accounts (see above).
 
 > **Importing again overwrites changes made here** to the same records. Each record is matched by its old id, so a second import updates records instead of duplicating them, but it also puts back the old values. Import once at cut-over, then work only in the new CRM.
 
-Starting from scratch instead? On the same page, **Load starting records** adds the sample departments, tasks and registers so you can see how everything fits.
+Starting from scratch instead? On the same page, **Load starting records** adds the open tasks, the trips, the team roles, the access register and the partner hotels so you can see how everything fits.
 
 ---
 
@@ -122,7 +122,9 @@ Build and publish the site:
 npm run deploy
 ```
 
-When it finishes it prints a `workers.dev` address. Open it, complete the **setup** page to create the first admin, and you are live. Share the address with the team.
+When it finishes it prints a `workers.dev` address. Open the address and finish setup straight away: until you do, anyone who finds the address could create the first admin. Then you are live. Share the address with the team.
+
+**Check sign-in speed on the live site.** Passwords are checked with a deliberately slow calculation, and the free plan gives each request a small CPU allowance. Time a real sign-in once after the first deploy. If Cloudflare reports CPU-limit errors (in the dashboard under the Worker's Logs), either lower the iteration count in `worker/src/lib/crypto.ts` (existing passwords keep working because every hash records the iteration count it was made with; new and changed passwords use the new count) or move to Workers Paid.
 
 **Later updates:** run `npm run deploy` again. If a new file has appeared in `worker/migrations`, run the `migrations apply luxcrm --remote` command first. Your records are never touched by a deploy.
 
@@ -150,6 +152,6 @@ To check everything still works after a change, run `npm test`.
 - Passwords are never stored as typed; only a scrambled (hashed) version is kept.
 - Sign-in lasts 14 days and is kept in a secure cookie that scripts on the page cannot read.
 - The server checks permissions on **every** request, so hiding a button is never the only protection.
-- After 5 wrong passwords for an email, sign-in is locked for 15 minutes.
+- After 5 wrong passwords for an email within 15 minutes, sign-in for that email is blocked until the oldest of those tries is 15 minutes old.
 - **Never store passwords, OTPs, card numbers or passport scans in the CRM.** The Access register records only who holds a login and where it is kept.
 - When someone leaves, press **Disable** next to their name on the **Users** page. They are signed out immediately and cannot sign in again.
