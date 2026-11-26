@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { todayIST } from "../src/lib/dates";
 import { api, applyMigrations, makeUser } from "./helpers";
+import { seedTask } from "./seed";
 
 beforeAll(async () => {
   await applyMigrations();
@@ -76,6 +77,25 @@ describe("visibility and listing", () => {
     expect((await api(mgr.cookie, "GET", "/api/tasks?scope=team")).status).toBe(200);
     expect((await api(admin.cookie, "GET", "/api/tasks?scope=team")).status).toBe(200);
     expect((await api(emp.cookie, "GET", "/api/tasks?scope=bogus")).status).toBe(400);
+  });
+
+  it("unassigned=1 on scope=all lists only open tasks with no assignee, admin only", async () => {
+    const admin = await makeUser("admin", "Management");
+    const mgr = await makeUser("manager", OPS);
+    const emp = await makeUser("employee", OPS);
+    const orphan = await seedTask({ title: "Orphan", assignee: null, by: admin.id });
+    await seedTask({ title: "Orphan done", assignee: null, by: admin.id, status: "Done" });
+    await seedTask({ title: "Owned", assignee: emp.id, by: admin.id });
+    const res = await api(admin.cookie, "GET", "/api/tasks?scope=all&unassigned=1");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).tasks.map((t: any) => t.id)).toEqual([orphan]);
+    for (const u of [emp, mgr]) {
+      expect((await api(u.cookie, "GET", "/api/tasks?scope=all&unassigned=1")).status).toBe(403);
+    }
+    // only meaningful together with scope=all
+    expect((await api(admin.cookie, "GET", "/api/tasks?scope=mine&unassigned=1")).status).toBe(400);
+    expect((await api(admin.cookie, "GET", "/api/tasks?unassigned=1")).status).toBe(400);
+    expect((await api(admin.cookie, "GET", "/api/tasks?scope=all&unassigned=2")).status).toBe(400);
   });
 
   it("manager team scope = dept tasks plus tasks of direct reports in other depts", async () => {

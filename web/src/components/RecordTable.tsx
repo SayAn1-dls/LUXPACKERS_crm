@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FieldDef, RegisterDef } from "../../../shared/schema";
 import { fmtDay } from "../lib/tasks";
-import { fieldOf, isLate, isOpen, money, safeLink, toneOf, valueOf } from "../lib/registers";
+import { NO_OWNER, fieldOf, isLate, isOpen, money, safeLink, toneOf, valueOf } from "../lib/registers";
 import type { RecordLink, RegisterRecord } from "../lib/registers";
 
 interface Props {
@@ -13,6 +13,8 @@ interface Props {
   onStatus: (row: RegisterRecord, value: string) => void;
   /** Row id whose status is being saved. */
   busyId: string | null;
+  /** Start with the owner filter set (e.g. NO_OWNER from the admin's "Needs an owner" list). */
+  initialOwner?: string;
 }
 
 type Chip = "" | "__open" | "__late" | string;
@@ -88,10 +90,10 @@ function Cell({ reg, r, k, first, busy, onStatus }: { reg: RegisterDef; r: Regis
 }
 
 /** Table with status chips, search, filters and sortable columns. All filtering is done here on the loaded rows. */
-export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busyId }: Props) {
+export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busyId, initialOwner = "" }: Props) {
   const [chip, setChip] = useState<Chip>("");
   const [q, setQ] = useState("");
-  const [extra, setExtra] = useState<Record<string, string>>({});
+  const [extra, setExtra] = useState<Record<string, string>>(initialOwner ? { owner_id: initialOwner } : {});
   const [sort, setSort] = useState<Sort | null>(null);
 
   const count = (v: string) => rows.filter((r) => r.data[reg.statusKey] === v).length;
@@ -116,7 +118,10 @@ export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busy
     let out = rows.filter((r) =>
       chip === "" ? true : chip === "__open" ? isOpen(reg, r) : chip === "__late" ? isLate(reg, r) : r.data[reg.statusKey] === chip,
     );
-    for (const [k, v] of Object.entries(extra)) if (v) out = out.filter((r) => String(valueOf(r, k) ?? "") === v);
+    for (const [k, v] of Object.entries(extra)) {
+      if (!v) continue;
+      out = k === "owner_id" && v === NO_OWNER ? out.filter((r) => !r.ownerId) : out.filter((r) => String(valueOf(r, k) ?? "") === v);
+    }
     if (needle) {
       out = out.filter(
         (r) =>
@@ -157,6 +162,7 @@ export function RecordTable({ register: reg, rows, onOpen, onNew, onStatus, busy
         {filters.map(({ key, fd, options }) => (
           <select key={key} className="input" aria-label={fd.label} value={extra[key] ?? ""} onChange={(e) => setExtra((x) => ({ ...x, [key]: e.target.value }))}>
             <option value="">{key === "owner_id" ? "Everyone" : `Any ${fd.label.toLowerCase()}`}</option>
+            {key === "owner_id" && <option value={NO_OWNER}>No owner</option>}
             {options.map((o) => <option key={o}>{o}</option>)}
           </select>
         ))}

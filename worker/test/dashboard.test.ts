@@ -262,6 +262,25 @@ describe("admin dashboard", () => {
     expect(d.latest[0].userName).toContain("admin");
   });
 
+  it("needsOwner counts unassigned open tasks and ownerless records per register", async () => {
+    const admin = await makeUser("admin", "Management");
+    const e = await makeUser("employee", OPS);
+    await seedTask({ assignee: null, by: admin.id });
+    await seedTask({ assignee: null, by: admin.id, status: "Done" });
+    await seedTask({ assignee: e.id, by: admin.id });
+    await seedRecord("leads", "no owner", { stage: "New enquiry" });
+    await seedRecord("leads", "no owner either", { stage: "Lost" });
+    await seedRecord("leads", "owned", { stage: "New enquiry" }, { owner: e.id });
+    await seedRecord("leads", "gone", { stage: "New enquiry" }, { deleted: true });
+    await seedRecord("trips", "no owner trip", { status: "Live" });
+    const d = (await get(admin)).needsOwner;
+    expect(d.tasks).toBe(1);
+    const by = Object.fromEntries(d.records.map((r: any) => [r.id, r]));
+    expect(by.leads).toEqual({ id: "leads", name: "Enquiries", count: 2 });
+    expect(by.trips.count).toBe(1);
+    expect(by.bookings.count).toBe(0);
+  });
+
   it("non-admin roles never get admin keys even with data present", async () => {
     const hr = await makeUser("hr", "People & Interns");
     expect(await get(hr)).not.toHaveProperty("latest");

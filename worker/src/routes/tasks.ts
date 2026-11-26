@@ -71,7 +71,12 @@ tasks.get("/", async (c) => {
   if (scope === "all" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
   if (scope === "team" && u.role !== "manager" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
 
+  const unassigned = c.req.query("unassigned");
+  if (unassigned !== undefined && (unassigned !== "1" || scope !== "all")) return c.json({ error: "invalid" }, 400);
+
   const { where, args } = taskScopeWhere(u, (scope ?? "default") as TaskScope);
+  // "Needs an owner": open tasks nobody is assigned to (admin only, because scope=all already is).
+  if (unassigned) where.push("t.assignee_id IS NULL", "t.status != 'Done'");
   const status = c.req.query("status");
   if (status) {
     if (!(TASK_STATUSES as readonly string[]).includes(status)) return c.json({ error: "invalid" }, 400);

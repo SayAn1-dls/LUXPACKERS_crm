@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
+import { pollWhileVisible } from "../lib/polling";
 import { useAuth } from "../auth";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { DeptCards } from "../components/DeptCards";
@@ -27,6 +28,37 @@ interface Dash {
   workload: { userId: string; name: string; open: number; late: number; submitted: number }[];
   pendingLeave: PendingLeaveItem[];
   registers: { id: string; name: string; open: number }[];
+  needsOwner: { tasks: number; records: { id: string; name: string; count: number }[] };
+}
+
+function NeedsOwner({ d }: { d: Dash["needsOwner"] }) {
+  const recs = d.records.filter((r) => r.count > 0);
+  const nothing = d.tasks === 0 && recs.length === 0;
+  return (
+    <section className="section">
+      <div className="section-head"><h2>Needs an owner</h2></div>
+      <div className="card card-pad">
+        {nothing ? (
+          <p className="muted small" style={{ margin: 0 }}>Every open task and record has an owner.</p>
+        ) : (
+          <ul className="upcoming">
+            {d.tasks > 0 && (
+              <li>
+                <Link className="rowbtn" to="/tasks?tab=all&owner=none">Open tasks</Link>
+                <span className="small muted">{d.tasks} with no one assigned</span>
+              </li>
+            )}
+            {recs.map((r) => (
+              <li key={r.id}>
+                <Link className="rowbtn" to={`/registers/${r.id}?owner=none`}>{r.name}</Link>
+                <span className="small muted">{r.count} with no owner</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export function AdminHome() {
@@ -35,7 +67,7 @@ export function AdminHome() {
   const [creating, setCreating] = useState(false);
   useTitle("Home");
   const closeDrawer = useCallback(() => { setOpenId(null); setCreating(false); }, []);
-  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard") });
+  const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard"), refetchInterval: pollWhileVisible });
   const d = dash.data;
   const f = d?.figures;
   const empty = !!d && !!f && d.departments.every((x) => x.total === 0) && d.registers.every((r) => r.open === 0) && f.tripsTotal === 0;
@@ -118,6 +150,8 @@ export function AdminHome() {
               </section>
             </div>
           </div>
+
+          <NeedsOwner d={d.needsOwner} />
 
           <section className="section">
             <div className="section-head"><h2>Waiting for review</h2></div>

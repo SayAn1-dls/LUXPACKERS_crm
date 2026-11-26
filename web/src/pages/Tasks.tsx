@@ -30,7 +30,12 @@ export function Tasks() {
   const current = tabs.find((t) => t.scope === asked) ?? tabs[0];
   const openId = params.get("open");
 
-  const q = useQuery({ queryKey: ["tasks", "list", current.scope], queryFn: () => api<{ tasks: Task[] }>("GET", `/tasks?scope=${current.scope}`) });
+  // "No owner" (open tasks nobody is assigned to) exists on the admin's All tab only.
+  const noOwner = current.scope === "all" && params.get("owner") === "none";
+  const q = useQuery({
+    queryKey: ["tasks", "list", current.scope, noOwner],
+    queryFn: () => api<{ tasks: Task[] }>("GET", `/tasks?scope=${current.scope}${noOwner ? "&unassigned=1" : ""}`),
+  });
 
   // "My team" can be narrowed to one person (from the manager's workload table).
   const assignee = current.scope === "team" ? params.get("assignee") : null;
@@ -65,7 +70,7 @@ export function Tasks() {
           {tabs.map((t) => (
             <button
               key={t.scope} type="button" role="tab" className="chip" aria-selected={t.scope === current.scope} aria-pressed={t.scope === current.scope}
-              onClick={() => setParams((p) => { const n = new URLSearchParams(p); n.set("tab", t.scope); n.delete("assignee"); return n; }, { replace: true })}
+              onClick={() => setParams((p) => { const n = new URLSearchParams(p); n.set("tab", t.scope); n.delete("assignee"); n.delete("owner"); return n; }, { replace: true })}
             >
               {t.label}
             </button>
@@ -77,6 +82,15 @@ export function Tasks() {
               <span className="small">Showing {assigneeName ? `${assigneeName}'s` : "one person's"} tasks</span>
               <button type="button" className="btn quiet" style={{ minHeight: 36 }} onClick={() => setParams((p) => { const n = new URLSearchParams(p); n.delete("assignee"); return n; }, { replace: true })}>Show everyone</button>
             </>
+          )}
+          {current.scope === "all" && (
+            <select
+              className="input" aria-label="Owner" value={noOwner ? "none" : ""}
+              onChange={(e) => setParams((p) => { const n = new URLSearchParams(p); if (e.target.value) n.set("owner", e.target.value); else n.delete("owner"); return n; }, { replace: true })}
+            >
+              <option value="">Any owner</option>
+              <option value="none">No owner</option>
+            </select>
           )}
           <label className="flabel" htmlFor="show">Show</label>
           <select id="show" className="input" value={show} onChange={(e) => setShow(e.target.value as Show)}>
@@ -90,7 +104,7 @@ export function Tasks() {
         ) : q.isError ? (
           <div className="empty"><h3>Could not load tasks</h3><p>{q.error.message}</p></div>
         ) : (
-          <TaskList tasks={rows} onOpen={openTask} empty={assignee ? "Nothing to show for this person." : show === "open" ? current.empty : "Nothing to show here."} />
+          <TaskList tasks={rows} onOpen={openTask} empty={assignee ? "Nothing to show for this person." : noOwner ? "Every open task has an owner." : show === "open" ? current.empty : "Nothing to show here."} />
         )}
         {!q.isPending && !q.isError && <div className="list-foot"><span>{rows.length} {rows.length === 1 ? "task" : "tasks"}</span></div>}
       </div>

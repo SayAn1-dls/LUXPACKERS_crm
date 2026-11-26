@@ -18,6 +18,21 @@ interface RecRow { id: string; title: string | null; dept: string | null; owner_
 
 const LIMIT = 9;
 
+/** Open tasks with no assignee, and live records with no owner in each register (the admin's "Needs an owner" list). */
+async function needsOwner(db: D1Database) {
+  const [tasks, recs] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id IS NULL AND status != 'Done'").first<{ n: number }>(),
+    db
+      .prepare("SELECT collection, COUNT(*) AS n FROM records WHERE owner_id IS NULL AND deleted_at IS NULL GROUP BY collection")
+      .all<{ collection: string; n: number }>(),
+  ]);
+  const byCollection = new Map(recs.results.map((r) => [r.collection, r.n]));
+  return {
+    tasks: tasks!.n,
+    records: REGISTERS.map((r) => ({ id: r.id, name: r.name, count: byCollection.get(r.id) ?? 0 })),
+  };
+}
+
 export async function adminSections(db: D1Database, today: string) {
   const month = today.slice(0, 7);
   const end = addDays(today, 7);
@@ -142,5 +157,5 @@ export async function adminSections(db: D1Database, today: string) {
     return { name: d.name, open: s?.open ?? 0, late: s?.late ?? 0, done: s?.done ?? 0, total: s?.total ?? 0 };
   });
 
-  return { figures, attention, next7, departments, latest: await auditFeed(db, 7) };
+  return { figures, attention, next7, departments, needsOwner: await needsOwner(db), latest: await auditFeed(db, 7) };
 }

@@ -56,6 +56,24 @@ describe("department scoping", () => {
   });
 });
 
+describe("owner=none filter", () => {
+  it("lists only records with no owner; readable by anyone who can read the register", async () => {
+    const admin = await makeUser("admin", "Management");
+    const e = await makeUser("employee", SALES);
+    const orphan = (await mkBooking(admin, { guest: "Nobody's" })).record;
+    await mkBooking(admin, { guest: "Owned" }, { ownerId: e.id });
+    const asAdmin = ((await (await api(admin.cookie, "GET", "/api/records/bookings?owner=none")).json()) as any).rows;
+    expect(asAdmin.map((r: any) => r.id)).toEqual([orphan.id]);
+    const asEmp = await api(e.cookie, "GET", "/api/records/bookings?owner=none");
+    expect(asEmp.status).toBe(200);
+    expect(((await asEmp.json()) as any).rows.map((r: any) => r.id)).toEqual([orphan.id]);
+    // still gated by register access
+    const hr = await makeUser("employee", "People & Interns");
+    expect((await api(hr.cookie, "GET", "/api/records/bookings?owner=none")).status).toBe(403);
+    expect((await api(admin.cookie, "GET", "/api/records/bookings?owner=someone")).status).toBe(400);
+  });
+});
+
 describe("create and validation", () => {
   it("creates with title from titleKey, default status, default dept, server-set fields", async () => {
     const e = await makeUser("employee", SALES);

@@ -102,6 +102,11 @@ records.get("/:collection", async (c) => {
     where.push(`json_extract(r.data, '$.${reg.statusKey}') = ?`);
     args.push(status);
   }
+  const owner = c.req.query("owner");
+  if (owner !== undefined) {
+    if (owner !== "none") return c.json({ error: "invalid", field: "owner" }, 400);
+    where.push("r.owner_id IS NULL");
+  }
   const q = c.req.query("q")?.trim();
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;

@@ -30,6 +30,8 @@ export const canDeleteIn = (u: User, id: string) => canUseRegister(u, id) && (u.
 export const fieldOf = (reg: RegisterDef, key: string): FieldDef | undefined => reg.fields.find((f) => f.key === key);
 
 /** Value of a column for a row. The owner lives outside `data`. */
+/** Filter value for "records with no owner" in the owner dropdown. */
+export const NO_OWNER = "__none";
 export const valueOf = (r: RegisterRecord, key: string): any => (key === "owner_id" ? r.ownerName ?? "" : r.data[key]);
 
 /** A record as the form and the calc functions see it (owner as an id under owner_id). */

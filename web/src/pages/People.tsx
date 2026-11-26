@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DEPT_NAMES } from "../../../shared/schema";
 import { api } from "../api";
@@ -15,7 +16,12 @@ export function People() {
   useTitle("People");
   const [q, setQ] = useState("");
   const [dept, setDept] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const openId = params.get("open");
+  const setOpenId = useCallback(
+    (id: string | null) => setParams((p) => { const n = new URLSearchParams(p); if (id) n.set("open", id); else n.delete("open"); return n; }, { replace: !id }),
+    [setParams],
+  );
   const [adding, setAdding] = useState(false);
   const peopleQ = useQuery({ queryKey: ["people"], queryFn: () => api<{ people: PersonRow[] }>("GET", "/people"), staleTime: 5 * 60_000 });
   const people = peopleQ.data?.people ?? [];

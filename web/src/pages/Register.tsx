@@ -8,7 +8,7 @@ import { NotFound } from "../components/Placeholder";
 import { RecordDrawer } from "../components/RecordDrawer";
 import { RecordTable } from "../components/RecordTable";
 import { useToast } from "../components/Toast";
-import { NO_ACCESS, canDeleteIn, summaryOf } from "../lib/registers";
+import { NO_ACCESS, NO_OWNER, canDeleteIn, summaryOf } from "../lib/registers";
 import type { RegisterRecord } from "../lib/registers";
 import { CONFLICT_MESSAGE, taskErrorMessage } from "../lib/tasks";
 import type { Person } from "../lib/tasks";
@@ -109,7 +109,7 @@ function RegisterView({ id }: { id: string }) {
       ) : q.isError ? (
         <div className="empty"><h3>Could not load {reg.name.toLowerCase()}</h3><p>{q.error.message}</p></div>
       ) : (
-        <RecordTable register={reg} rows={rows} onOpen={open} onNew={() => setCreating(true)} onStatus={(r, v) => void quickStatus(r, v)} busyId={busyId} />
+        <RecordTable register={reg} rows={rows} onOpen={open} onNew={() => setCreating(true)} onStatus={(r, v) => void quickStatus(r, v)} busyId={busyId} initialOwner={params.get("owner") === "none" ? NO_OWNER : ""} />
       )}
       {(record || creating) && user && (
         <RecordDrawer
