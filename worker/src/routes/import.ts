@@ -6,6 +6,7 @@ import type { AppEnv, SessionUser } from "../env";
 import { auditStmt } from "../lib/audit";
 import { cleanLegacyData, cleanLegacyLinks, isDateString, titleOf } from "../lib/recordFields";
 import type { Data } from "../lib/recordFields";
+import { canImport } from "../lib/policy";
 import { requireUser } from "../lib/session";
 import { SEED } from "../seed";
 
@@ -64,7 +65,7 @@ const badCollection = (src: Record<string, unknown>) =>
 export const importRoutes = new Hono<AppEnv>();
 importRoutes.use("*", requireUser);
 importRoutes.use("*", async (c, next) => {
-  if (c.var.user!.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (!canImport(c.var.user!)) return c.json({ error: "forbidden" }, 403);
   await next();
 });
 

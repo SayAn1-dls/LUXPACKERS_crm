@@ -273,3 +273,60 @@ export interface TaskComment {
   kind: "comment" | "sent_back" | "approved";
   createdAt: string;
 }
+
+/* Positions: what a person may open and do. Every key is required; the Worker validates with zod (worker/src/lib/positions.ts). */
+export const TASK_LEVELS = ["own", "team", "all"] as const;
+export type TaskLevel = (typeof TASK_LEVELS)[number];
+export const LEAVE_LEVELS = ["own", "team", "all"] as const;
+export type LeaveLevel = (typeof LEAVE_LEVELS)[number];
+/** view = read; edit = read + create + edit; manage = edit + move to Trash. */
+export const REGISTER_LEVELS = ["none", "view", "edit", "manage"] as const;
+export type RegisterLevel = (typeof REGISTER_LEVELS)[number];
+/** full = private fields (joined on, kind, left people) + onboarding. */
+export const PEOPLE_LEVELS = ["basic", "full"] as const;
+export type PeopleLevel = (typeof PEOPLE_LEVELS)[number];
+
+export interface Perms {
+  /** own = tasks on or by me; team = also my department and my reports; all = every task. */
+  tasks: TaskLevel;
+  /** One entry per register id in REGISTERS. */
+  registers: Record<string, RegisterLevel>;
+  /** Whose leave I can approve: own = nobody's; team = my department and reports; all = everyone's. */
+  leave: LeaveLevel;
+  people: PeopleLevel;
+  /** May create accounts; they always get the Employee starter position. */
+  addPeople: boolean;
+}
+
+export const ADMIN_POSITION_ID = "pos_admin";
+export const EMPLOYEE_POSITION_ID = "pos_employee";
+
+/** Position as returned by /api/positions. */
+export interface Position {
+  id: string;
+  name: string;
+  isAdmin: boolean;
+  /** Built-in positions (Admin, Employee) cannot be deleted. */
+  builtIn: boolean;
+  perms: Perms;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The signed-in user as returned by /api/me, /api/auth/login and /api/setup. */
+export interface Me {
+  id: string;
+  name: string;
+  email: string;
+  /** Display label only, derived from the position. Never use it for permissions. */
+  role: RoleName;
+  dept: string;
+  managerId: string | null;
+  mustChangePassword: boolean;
+  positionId: string | null;
+  positionName: string | null;
+  isAdmin: boolean;
+  /** Effective permissions (an admin gets every permission at its highest level). */
+  perms: Perms;
+}

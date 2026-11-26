@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { api, applyMigrations, makeUser } from "./helpers";
+import { api, applyMigrations, makeUser, permsLike } from "./helpers";
 import { clearAll, seedRecord, seedTask } from "./seed";
 
 beforeAll(async () => {
@@ -19,12 +19,15 @@ describe("search", () => {
   });
 
   it("as employee never returns finance records", async () => {
-    const e = await makeUser("employee", "Operations");
+    const e = await makeUser("employee", "Operations", { perms: await permsLike("employee", { registers: { partners: "view" } }) });
     await seedRecord("finance", "Zebra invoice", { status: "Pending" });
     await seedRecord("partners", "Zebra hotel", { status: "Active" });
     const body = (await (await search(e, "zebra")).json()) as any;
     expect(body.results.map((r: any) => r.title)).toEqual(["Zebra hotel"]);
-    const f = await makeUser("employee", "Finance");
+    // A Finance-dept Employee still cannot; a position with finance=view can (and without partners, sees only finance).
+    const fe = await makeUser("employee", "Finance");
+    expect(((await (await search(fe, "zebra")).json()) as any).results.map((r: any) => r.title)).toEqual([]);
+    const f = await makeUser("employee", "Marketing", { perms: await permsLike("employee", { registers: { finance: "view", partners: "none" } }) });
     const fb = (await (await search(f, "zebra")).json()) as any;
     expect(fb.results.map((r: any) => r.title)).toEqual(["Zebra invoice"]);
   });

@@ -17,6 +17,8 @@ interface Props {
   record: RegisterRecord | null;
   /** People who can own a record (not left). */
   people: Person[];
+  /** False for a view-only register: the drawer becomes a read-only sheet. */
+  canEdit: boolean;
   canDelete: boolean;
   conflict: boolean;
   onConflict: () => void;
@@ -65,7 +67,7 @@ function validate(reg: RegisterDef, d: Draft): Record<string, string> {
   return errs;
 }
 
-export function RecordDrawer({ register: reg, record, people, canDelete, conflict, onConflict, onReload, onClose }: Props) {
+export function RecordDrawer({ register: reg, record, people, canEdit, canDelete, conflict, onConflict, onReload, onClose }: Props) {
   const { user } = useAuth();
   const notify = useToast();
   const qc = useQueryClient();
@@ -195,7 +197,10 @@ export function RecordDrawer({ register: reg, record, people, canDelete, conflic
           {reg.id === "access" && (
             <div className="notice red"><b>Never write a password, OTP, API key or card number in this CRM.</b> Record only who holds a login and where it is kept.</div>
           )}
-          <RecordFields register={reg} draft={draft} set={set} people={people} ownerName={record?.ownerName ?? null} errors={errors} />
+          {!canEdit && <p className="notice soft">You can look at this {reg.singular} but not change it.</p>}
+          <fieldset className="plain" disabled={!canEdit}>
+            <RecordFields register={reg} draft={draft} set={set} people={people} ownerName={record?.ownerName ?? null} errors={errors} />
+          </fieldset>
           {record && (
             <div className="history">
               <span className="flabel">Last change</span>
@@ -216,7 +221,7 @@ export function RecordDrawer({ register: reg, record, people, canDelete, conflic
           </div>
           <div className="actions">
             <button type="button" className="btn quiet" onClick={onClose}>{isNew || dirty ? "Cancel" : "Close"}</button>
-            {(isNew || dirty) && <button type="button" className="btn" disabled={busy} onClick={() => void save()}>{isNew ? `Add ${reg.singular}` : "Save changes"}</button>}
+            {canEdit && (isNew || dirty) && <button type="button" className="btn" disabled={busy} onClick={() => void save()}>{isNew ? `Add ${reg.singular}` : "Save changes"}</button>}
           </div>
         </div>
       </section>

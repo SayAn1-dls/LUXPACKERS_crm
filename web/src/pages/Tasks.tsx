@@ -5,6 +5,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { TaskDrawer } from "../components/TaskDrawer";
 import { TaskList } from "../components/TaskList";
+import { taskLevel } from "../lib/perms";
 import { useTitle } from "../lib/useTitle";
 import type { Task } from "../lib/tasks";
 
@@ -25,12 +26,13 @@ export function Tasks() {
   const [creating, setCreating] = useState(false);
   const [show, setShow] = useState<Show>("open");
 
-  const tabs = TABS.filter((t) => (t.scope === "team" ? user?.role === "manager" || user?.role === "admin" : t.scope === "all" ? user?.role === "admin" : true));
+  const level = user ? taskLevel(user) : "own";
+  const tabs = TABS.filter((t) => (t.scope === "team" ? level !== "own" : t.scope === "all" ? level === "all" : true));
   const asked = params.get("tab");
   const current = tabs.find((t) => t.scope === asked) ?? tabs[0];
   const openId = params.get("open");
 
-  // "No owner" (open tasks nobody is assigned to) exists on the admin's All tab only.
+  // "No owner" (open tasks nobody is assigned to) exists on the All tab only.
   const noOwner = current.scope === "all" && params.get("owner") === "none";
   const q = useQuery({
     queryKey: ["tasks", "list", current.scope, noOwner],

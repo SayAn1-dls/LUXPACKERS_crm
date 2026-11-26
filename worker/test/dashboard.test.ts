@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { api, applyMigrations, makeUser } from "./helpers";
+import { api, applyMigrations, makeUser, permsLike } from "./helpers";
 import { addDays, clearAll, seedLeave, seedRecord, seedTask, today } from "./seed";
 
 beforeAll(async () => {
@@ -17,13 +17,33 @@ const ids = (list: any[]) => list.map((t) => t.id).sort();
 const OPS = "Operations";
 
 describe("employee dashboard", () => {
-  it("has no manager/hr/admin keys", async () => {
+  it("has no manager/hr/admin keys and, with no registers, no register counts", async () => {
     const e = await makeUser("employee", OPS);
     const d = await get(e);
     for (const k of ["overdue", "today", "week", "sentBack", "waitingOnMe", "submitted", "leaveBalance", "unread"]) expect(d).toHaveProperty(k);
     for (const k of ["reviewQueue", "workload", "pendingLeave", "registers", "onboarding", "joiningSoon", "figures", "attention", "next7", "departments", "latest"]) {
       expect(d).not.toHaveProperty(k);
     }
+  });
+
+  it("register counts cover only registers the position can read, one count per register", async () => {
+    const e = await makeUser("employee", OPS, { perms: await permsLike("employee", { registers: { leads: "view", partners: "edit" } }) });
+    await seedRecord("partners", "P1", { status: "Active" });
+    await seedRecord("partners", "P2", { status: "Proposed" });
+    await seedRecord("partners", "Gone", { status: "Active" }, { deleted: true });
+    await seedRecord("leads", "Won", { stage: "Confirmed" });
+    await seedRecord("leads", "Open", { stage: "New enquiry" });
+    await seedRecord("finance", "F", { status: "Pending" });
+    const d = await get(e);
+    expect(d.registers).toEqual([
+      { id: "leads", name: "Enquiries", open: 1 },
+      { id: "partners", name: "Partners", open: 2 },
+    ]);
+  });
+
+  it("a position with no readable register gets no register counts", async () => {
+    const h = await makeUser("hr", OPS);
+    expect(await get(h)).not.toHaveProperty("registers");
   });
 
   it("buckets overdue / today / week / submitted from my own open tasks only", async () => {

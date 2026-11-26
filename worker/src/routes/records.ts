@@ -5,7 +5,7 @@ import { DEPT_NAMES, REGISTERS, registerDepts } from "../../../shared/schema";
 import type { RegisterDef } from "../../../shared/schema";
 import type { AppEnv } from "../env";
 import { auditStmt } from "../lib/audit";
-import { canDeleteRecord, canReadRegister, canWriteRegister } from "../lib/policy";
+import { canDeleteRecord, canReadRegister, canUseTrash, canWriteRegister } from "../lib/policy";
 import { requireUser } from "../lib/session";
 import { Invalid, applyData, isEmpty, titleOf } from "../lib/recordFields";
 import type { Data } from "../lib/recordFields";
@@ -92,7 +92,7 @@ records.get("/:collection", async (c) => {
   if (g instanceof Response) return g;
   const { reg } = g;
   const trash = c.req.query("trash") === "1";
-  if (trash && c.var.user!.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (trash && !canUseTrash(c.var.user!)) return c.json({ error: "forbidden" }, 403);
 
   const where = ["r.collection = ?", trash ? "r.deleted_at IS NOT NULL" : "r.deleted_at IS NULL"];
   const args: unknown[] = [reg.id];
@@ -244,7 +244,7 @@ records.post("/:collection/:id/restore", async (c) => {
   const { reg } = g;
   const u = c.var.user!;
   const db = c.env.DB;
-  if (u.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (!canUseTrash(u)) return c.json({ error: "forbidden" }, 403);
   const row = await load(db, reg.id, c.req.param("id") ?? "");
   if (!row || !row.deleted_at) return c.json({ error: "not_found" }, 404);
   const now = new Date().toISOString();

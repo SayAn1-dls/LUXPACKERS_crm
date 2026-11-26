@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AppEnv, SessionUser } from "../env";
+import type { AppEnv } from "../env";
 import { hashPassword, verifyPassword } from "../lib/crypto";
 import { audit } from "../lib/audit";
 import {
   clearSessionCookie,
   createSession,
   destroySessions,
+  loadSessionUser,
   requireUser,
   sessionTokenHash,
   setSessionCookie,
@@ -30,26 +31,8 @@ const PasswordBody = z.object({
 interface UserRow {
   id: string;
   name: string;
-  email: string;
-  role: SessionUser["role"];
-  dept: string;
-  manager_id: string | null;
-  must_change_password: number;
   status: string;
   password_hash: string;
-  password_salt: string;
-}
-
-function toSessionUser(r: UserRow): SessionUser {
-  return {
-    id: r.id,
-    name: r.name,
-    email: r.email,
-    role: r.role,
-    dept: r.dept,
-    managerId: r.manager_id,
-    mustChangePassword: r.must_change_password === 1,
-  };
 }
 
 export const auth = new Hono<AppEnv>();
@@ -67,7 +50,7 @@ auth.post("/login", async (c) => {
     .first<{ n: number }>();
   if ((recent?.n ?? 0) >= MAX_FAILED) return c.json({ error: "locked" }, 429);
 
-  const row = await db.prepare("SELECT * FROM users WHERE email = ?").bind(email).first<UserRow>();
+  const row = await db.prepare("SELECT id, name, status, password_hash FROM users WHERE email = ?").bind(email).first<UserRow>();
   const ok = row
     ? await verifyPassword(password, row.password_hash)
     : (await verifyPassword(password, DUMMY_HASH), false);
@@ -85,7 +68,7 @@ auth.post("/login", async (c) => {
   const token = await createSession(db, row.id, c.req.header("user-agent") ?? null);
   setSessionCookie(c, token);
   await audit(db, { id: row.id }, "login", "user", row.id, row.name);
-  return c.json({ user: toSessionUser(row) });
+  return c.json({ user: await loadSessionUser(db, row.id) });
 });
 
 auth.post("/logout", requireUser, async (c) => {

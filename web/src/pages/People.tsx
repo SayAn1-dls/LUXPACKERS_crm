@@ -7,7 +7,9 @@ import { useAuth } from "../auth";
 import { AddPersonDrawer } from "../components/AddPersonDrawer";
 import { PersonDrawer } from "../components/PersonDrawer";
 import { Pill } from "../components/Pill";
-import { ROLE_LABEL, STATUS_LABEL, STATUS_TONE, canManageUser, isStaff } from "../lib/people";
+import { Empty, Icon } from "../components/Icon";
+import { STATUS_LABEL, STATUS_TONE, positionLabel } from "../lib/people";
+import { canAddPeople, canSeePeoplePrivate } from "../lib/perms";
 import type { PersonRow } from "../lib/people";
 import { useTitle } from "../lib/useTitle";
 
@@ -25,7 +27,7 @@ export function People() {
   const [adding, setAdding] = useState(false);
   const peopleQ = useQuery({ queryKey: ["people"], queryFn: () => api<{ people: PersonRow[] }>("GET", "/people"), staleTime: 5 * 60_000 });
   const people = peopleQ.data?.people ?? [];
-  const staff = !!user && isStaff(user);
+  const staff = !!user && canSeePeoplePrivate(user);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -44,8 +46,8 @@ export function People() {
           <h1>People</h1>
           <p>Who is on the team, what they do and how to reach them.</p>
         </div>
-        {user && canManageUser(user, "employee") && (
-          <div className="actions"><button type="button" className="btn" onClick={() => setAdding(true)}>Add a person</button></div>
+        {user && canAddPeople(user) && (
+          <div className="actions"><button type="button" className="btn" onClick={() => setAdding(true)}><Icon name="userPlus" size={16} />{user.isAdmin ? "Add a person" : "Add an employee"}</button></div>
         )}
       </div>
       <div className="card">
@@ -57,16 +59,16 @@ export function People() {
           </select>
         </div>
         {peopleQ.isPending ? (
-          <div className="empty">Loading people…</div>
+          <Empty icon="people">Loading people…</Empty>
         ) : peopleQ.isError ? (
-          <div className="empty"><h3>Could not load people</h3><p>Refresh the page to try again.</p></div>
+          <Empty icon="people" title="Could not load people"><p>Refresh the page to try again.</p></Empty>
         ) : rows.length === 0 ? (
-          <div className="empty">No one matches that search.</div>
+          <Empty icon="people" title="No one found"><p>No one matches that search.</p></Empty>
         ) : (
           <div className="table-wrap">
             <table className="stack">
               <thead>
-                <tr><th>Name</th><th>Department</th><th>Role</th><th>Contact</th><th>Manager</th>{staff && <th>Status</th>}</tr>
+                <tr><th>Name</th><th>Department</th><th>Position</th><th>Contact</th><th>Manager</th>{staff && <th>Status</th>}</tr>
               </thead>
               <tbody>
                 {rows.map((p) => (
@@ -76,7 +78,7 @@ export function People() {
                       {p.title && <div className="t-meta">{p.title}</div>}
                     </td>
                     <td data-l="Department">{p.dept}</td>
-                    <td data-l="Role">{ROLE_LABEL[p.role]}</td>
+                    <td data-l="Position">{positionLabel(p)}</td>
                     <td data-l="Contact"><div>{p.email}</div>{p.phone && <div className="small muted">{p.phone}</div>}</td>
                     <td data-l="Manager">{(p.managerId && byId.get(p.managerId)?.name) || <span className="muted">None</span>}</td>
                     {staff && <td data-l="Status"><Pill tone={STATUS_TONE[p.status]}>{STATUS_LABEL[p.status]}</Pill></td>}

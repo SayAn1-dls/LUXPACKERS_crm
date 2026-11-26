@@ -10,6 +10,7 @@ import { Import } from "./pages/Import";
 import { Leave } from "./pages/Leave";
 import { Login } from "./pages/Login";
 import { People } from "./pages/People";
+import { Positions } from "./pages/Positions";
 import { Register } from "./pages/Register";
 import { Settings } from "./pages/Settings";
 import { Setup } from "./pages/Setup";
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
           { path: "people", element: <People /> },
           { path: "leave", element: <Leave /> },
           { path: "users", element: <Users /> },
+          { path: "positions", element: <Positions /> },
           { path: "audit", element: <Audit /> },
           { path: "import", element: <Import /> },
           { path: "settings", element: <Settings /> },

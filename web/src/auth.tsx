@@ -1,18 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { RoleName } from "../../shared/schema";
+import type { Me } from "../../shared/schema";
 import { api, ApiError, setApiHooks } from "./api";
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: RoleName;
-  dept: string;
-  managerId: string | null;
-  mustChangePassword: boolean;
-}
+/** The signed-in person, with the effective permissions of their position. */
+export type User = Me;
 
 interface AuthValue {
   /** null when signed out (or still loading, see `loading`). */

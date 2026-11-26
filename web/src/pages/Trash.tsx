@@ -11,7 +11,7 @@ import { useTitle } from "../lib/useTitle";
 
 export function Trash() {
   const { user } = useAuth();
-  if (user?.role !== "admin") return <Placeholder title="Trash" eyebrow="Administrator" note="You don't have access to this page." />;
+  if (!user?.isAdmin) return <Placeholder title="Trash" eyebrow="Administrator" note="You don't have access to this page." />;
   return <TrashList />;
 }
 
@@ -59,7 +59,7 @@ function TrashList() {
       ) : failed ? (
         <div className="empty"><h3>Could not load the Trash</h3><p>Refresh the page to try again.</p></div>
       ) : sections.length === 0 ? (
-        <div className="card"><div className="empty"><h3>The Trash is empty</h3><p>Deleted records will wait here until you restore them.</p></div></div>
+        <div className="card"><div className="empty"><h3>Squeaky clean</h3><p>The Trash is empty. Deleted records wait here until you restore them.</p></div></div>
       ) : (
         sections.map(({ reg, rows }) => (
           <section className="section" key={reg.id}>

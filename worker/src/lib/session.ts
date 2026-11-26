@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AppContext, AppEnv, SessionUser } from "../env";
 import { randomToken, sha256Hex } from "./crypto";
+import { ADMIN_PERMS, NO_PERMS, parsePerms, roleLabel } from "./positions";
 
 export const COOKIE = "lux_session";
 const DAY = 86_400_000;
@@ -51,17 +52,48 @@ export async function sessionTokenHash(c: AppContext): Promise<string | null> {
   return token ? sha256Hex(token) : null;
 }
 
-interface Row {
-  session_id: string;
-  expires_at: string;
+/** Columns needed to build a SessionUser; select FROM users u LEFT JOIN positions p ON p.id = u.position_id. */
+export const SESSION_USER_COLS = `u.id, u.name, u.email, u.dept, u.manager_id, u.must_change_password, u.status,
+  p.id AS position_id, p.name AS position_name, p.is_admin AS position_is_admin, p.perms AS position_perms`;
+
+export interface SessionUserRow {
   id: string;
   name: string;
   email: string;
-  role: SessionUser["role"];
   dept: string;
   manager_id: string | null;
   must_change_password: number;
   status: string;
+  position_id: string | null;
+  position_name: string | null;
+  position_is_admin: number | null;
+  position_perms: string | null;
+}
+
+export function toSessionUser(r: SessionUserRow): SessionUser {
+  const isAdmin = r.position_is_admin === 1;
+  const perms = isAdmin ? ADMIN_PERMS : r.position_id ? parsePerms(r.position_perms) : NO_PERMS;
+  return {
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: roleLabel(isAdmin, perms),
+    dept: r.dept,
+    managerId: r.manager_id,
+    mustChangePassword: r.must_change_password === 1,
+    positionId: r.position_id,
+    positionName: r.position_name,
+    isAdmin,
+    perms,
+  };
+}
+
+export async function loadSessionUser(db: D1Database, userId: string): Promise<SessionUser | null> {
+  const row = await db
+    .prepare(`SELECT ${SESSION_USER_COLS} FROM users u LEFT JOIN positions p ON p.id = u.position_id WHERE u.id = ?`)
+    .bind(userId)
+    .first<SessionUserRow>();
+  return row ? toSessionUser(row) : null;
 }
 
 export const readSession: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -70,12 +102,11 @@ export const readSession: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (token) {
     const sid = await sha256Hex(token);
     const row = await c.env.DB.prepare(
-      `SELECT s.id AS session_id, s.expires_at, u.id, u.name, u.email, u.role, u.dept, u.manager_id,
-              u.must_change_password, u.status
-         FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
+      `SELECT s.id AS session_id, s.expires_at, ${SESSION_USER_COLS}
+         FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN positions p ON p.id = u.position_id WHERE s.id = ?`,
     )
       .bind(sid)
-      .first<Row>();
+      .first<SessionUserRow & { session_id: string; expires_at: string }>();
     if (row) {
       const exp = Date.parse(row.expires_at);
       if (!(exp > Date.now()) || row.status === "left") {
@@ -87,15 +118,7 @@ export const readSession: MiddlewareHandler<AppEnv> = async (c, next) => {
             .run();
           setSessionCookie(c, token);
         }
-        c.set("user", {
-          id: row.id,
-          name: row.name,
-          email: row.email,
-          role: row.role,
-          dept: row.dept,
-          managerId: row.manager_id,
-          mustChangePassword: row.must_change_password === 1,
-        });
+        c.set("user", toSessionUser(row));
       }
     }
   }

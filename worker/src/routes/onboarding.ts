@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ONBOARDING_STEPS } from "../../../shared/schema";
 import type { AppEnv } from "../env";
 import { auditStmt } from "../lib/audit";
+import { canManageOnboarding } from "../lib/policy";
 import { requireUser } from "../lib/session";
 
 export const onboarding = new Hono<AppEnv>();
@@ -25,7 +26,7 @@ const target = (db: D1Database, id: string) =>
 onboarding.get("/:userId", async (c) => {
   const u = c.var.user!;
   const id = c.req.param("userId");
-  if (u.role !== "hr" && u.role !== "admin" && u.id !== id) return c.json({ error: "forbidden" }, 403);
+  if (!canManageOnboarding(u) && u.id !== id) return c.json({ error: "forbidden" }, 403);
   if (!(await target(c.env.DB, id))) return c.json({ error: "not_found" }, 404);
   return c.json({ steps: await steps(c.env.DB, id) });
 });
@@ -34,7 +35,7 @@ const PatchBody = z.object({ step: z.string(), done: z.boolean() });
 
 onboarding.patch("/:userId", async (c) => {
   const u = c.var.user!;
-  if (u.role !== "hr" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (!canManageOnboarding(u)) return c.json({ error: "forbidden" }, 403);
   const db = c.env.DB;
   const id = c.req.param("userId");
   const person = await target(db, id);

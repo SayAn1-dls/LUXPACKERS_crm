@@ -4,7 +4,7 @@ import type { AppEnv } from "../env";
 import { auditStmt } from "../lib/audit";
 import { isRealDate, leaveDays, todayIST } from "../lib/dates";
 import { notifyStmts } from "../lib/notify";
-import { canDecideLeave } from "../lib/policy";
+import { canDecideLeave, canListLeave } from "../lib/policy";
 import { requireUser } from "../lib/session";
 import { loadSettings } from "./settings";
 
@@ -37,9 +37,10 @@ interface Row {
   note: string | null;
   user_name: string;
   user_manager_id: string | null;
+  user_dept: string;
 }
 
-const SELECT = `SELECT l.*, u.name AS user_name, u.manager_id AS user_manager_id
+const SELECT = `SELECT l.*, u.name AS user_name, u.manager_id AS user_manager_id, u.dept AS user_dept
   FROM leave_requests l JOIN users u ON u.id = l.user_id`;
 
 const toApi = (r: Row) => ({
@@ -94,12 +95,14 @@ leave.get("/", async (c) => {
   const db = c.env.DB;
   const scope = c.req.query("scope") ?? "mine";
   if (!["mine", "team", "all"].includes(scope)) return c.json({ error: "invalid" }, 400);
-  if (scope === "team" && u.role !== "manager") return c.json({ error: "forbidden" }, 403);
-  if (scope === "all" && u.role !== "hr" && u.role !== "admin") return c.json({ error: "forbidden" }, 403);
+  if (!canListLeave(u, scope as "mine" | "team" | "all")) return c.json({ error: "forbidden" }, 403);
 
-  const where = scope === "mine" ? "WHERE l.user_id = ?" : scope === "team" ? "WHERE u.manager_id = ?" : "";
-  const stmt = db.prepare(`${SELECT} ${where} ORDER BY l.start DESC, l.id LIMIT 500`);
-  const { results } = await (scope === "all" ? stmt : stmt.bind(u.id)).all<Row>();
+  // team = same department or my reports, never my own (that is the "mine" tab).
+  const [where, args] =
+    scope === "mine" ? ["WHERE l.user_id = ?", [u.id]]
+    : scope === "team" ? ["WHERE (u.dept = ? OR u.manager_id = ?) AND l.user_id != ?", [u.dept, u.id, u.id]]
+    : ["", []];
+  const { results } = await db.prepare(`${SELECT} ${where} ORDER BY l.start DESC, l.id LIMIT 500`).bind(...args).all<Row>();
   const requests = results.map(toApi);
   if (scope !== "mine") return c.json({ requests });
 
@@ -139,13 +142,20 @@ leave.post("/", async (c) => {
     }
   }
 
-  const managerId = (
-    await db.prepare("SELECT id FROM users WHERE id = ? AND role = 'manager' AND status != 'left'").bind(u.managerId ?? "").first<{ id: string }>()
-  )?.id;
-  const hrIds = (await db.prepare("SELECT id FROM users WHERE role = 'hr' AND status != 'left'").all<{ id: string }>()).results.map((r) => r.id);
+  // Who to tell: non-admin approvers by their leave level. "team" approvers in my department or my manager land on
+  // the Team tab; "all" approvers on the All tab. Admins can decide too but are not notified (as before).
+  const { results: approvers } = await db
+    .prepare(
+      `SELECT u.id, json_extract(p.perms, '$.leave') AS level FROM users u JOIN positions p ON p.id = u.position_id
+       WHERE u.status != 'left' AND u.id != ? AND p.is_admin = 0
+         AND (json_extract(p.perms, '$.leave') = 'all'
+              OR (json_extract(p.perms, '$.leave') = 'team' AND (u.dept = ? OR u.id = ?)))`,
+    )
+    .bind(u.id, u.dept, u.managerId ?? "")
+    .all<{ id: string; level: string }>();
   // Approvers land on the tab where they decide; the requester's own decision links stay on "/leave".
-  const managerWho = managerId && managerId !== u.id ? [managerId] : [];
-  const hrWho = hrIds.filter((id) => id !== u.id && id !== managerId);
+  const managerWho = approvers.filter((a) => a.level === "team").map((a) => a.id);
+  const hrWho = approvers.filter((a) => a.level === "all").map((a) => a.id);
 
   const id = crypto.randomUUID();
   const title = `${u.name} requested ${b.kind} leave (${b.start === b.end ? b.start : `${b.start} to ${b.end}`})`;
@@ -171,7 +181,7 @@ async function decide(
   const db = c.env.DB;
   const row = await load(db, c.req.param("id"));
   if (!row) return c.json({ error: "not_found" }, 404);
-  if (!canDecideLeave(u, { id: row.user_id, managerId: row.user_manager_id })) return c.json({ error: "forbidden" }, 403);
+  if (!canDecideLeave(u, { id: row.user_id, managerId: row.user_manager_id, dept: row.user_dept })) return c.json({ error: "forbidden" }, 403);
   const parsed = DecideBody.safeParse((await c.req.json().catch(() => ({}))) ?? {});
   if (!parsed.success) return c.json({ error: "invalid" }, 400);
   if (row.status !== "Pending") return c.json({ error: "not_pending" }, 409);

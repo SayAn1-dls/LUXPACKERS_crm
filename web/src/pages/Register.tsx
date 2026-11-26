@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { REGISTERS, registerDepts } from "../../../shared/schema";
+import { REGISTERS } from "../../../shared/schema";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth";
 import { NotFound } from "../components/Placeholder";
 import { RecordDrawer } from "../components/RecordDrawer";
 import { RecordTable } from "../components/RecordTable";
 import { useToast } from "../components/Toast";
-import { NO_ACCESS, NO_OWNER, canDeleteIn, summaryOf } from "../lib/registers";
+import { canDeleteRecord, canWriteRegister } from "../lib/perms";
+import { NO_ACCESS, NO_OWNER, summaryOf } from "../lib/registers";
 import type { RegisterRecord } from "../lib/registers";
 import { CONFLICT_MESSAGE, taskErrorMessage } from "../lib/tasks";
 import type { Person } from "../lib/tasks";
@@ -42,7 +43,7 @@ function RegisterView({ id }: { id: string }) {
   const rows = q.data?.rows ?? [];
   const openId = params.get("open");
   const record = openId ? rows.find((r) => r.id === openId) ?? null : null;
-  const dept = registerDepts(id);
+  const canEdit = !!user && canWriteRegister(user, id);
 
   // A deep link to a record that is gone (or never was) just opens the register.
   useEffect(() => {
@@ -89,11 +90,11 @@ function RegisterView({ id }: { id: string }) {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">{dept.length === 1 ? `Register · ${dept[0]}` : "Register · all departments"}</div>
+          <div className="eyebrow">{canEdit ? "Register" : "Register · view only"}</div>
           <h1>{reg.name}</h1>
           <p>{reg.intro}{summary && <><br /><span style={{ color: "var(--text)" }}>{summary}</span></>}</p>
         </div>
-        <div className="actions"><button type="button" className="btn" onClick={() => setCreating(true)}>New {reg.singular}</button></div>
+        {canEdit && <div className="actions"><button type="button" className="btn" onClick={() => setCreating(true)}>New {reg.singular}</button></div>}
       </div>
       {reg.id === "access" && (
         <div className="notice red"><b>Never write a password, OTP, API key or card number in this CRM.</b> Record only who holds a login and where it is kept.</div>
@@ -109,11 +110,11 @@ function RegisterView({ id }: { id: string }) {
       ) : q.isError ? (
         <div className="empty"><h3>Could not load {reg.name.toLowerCase()}</h3><p>{q.error.message}</p></div>
       ) : (
-        <RecordTable register={reg} rows={rows} onOpen={open} onNew={() => setCreating(true)} onStatus={(r, v) => void quickStatus(r, v)} busyId={busyId} initialOwner={params.get("owner") === "none" ? NO_OWNER : ""} />
+        <RecordTable register={reg} rows={rows} onOpen={open} onNew={canEdit ? () => setCreating(true) : null} onStatus={(r, v) => void quickStatus(r, v)} busyId={busyId} initialOwner={params.get("owner") === "none" ? NO_OWNER : ""} />
       )}
-      {(record || creating) && user && (
+      {(record || (creating && canEdit)) && user && (
         <RecordDrawer
-          key={record?.id ?? "new"} register={reg} record={record} people={people} canDelete={canDeleteIn(user, id)}
+          key={record?.id ?? "new"} register={reg} record={record} people={people} canEdit={canEdit} canDelete={canDeleteRecord(user, id)}
           conflict={conflict} onConflict={() => setConflict(true)} onReload={() => void reload()} onClose={close}
         />
       )}

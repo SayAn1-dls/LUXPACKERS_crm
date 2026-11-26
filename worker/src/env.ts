@@ -1,6 +1,8 @@
 import type { Context } from "hono";
+import type { Perms, RoleName } from "../../shared/schema";
 
-export type Role = "admin" | "manager" | "hr" | "employee";
+/** Display label only (derived from the position). Permissions come from isAdmin / perms via lib/policy.ts. */
+export type Role = RoleName;
 
 export interface SessionUser {
   id: string;
@@ -10,6 +12,11 @@ export interface SessionUser {
   dept: string;
   managerId: string | null;
   mustChangePassword: boolean;
+  positionId: string | null;
+  positionName: string | null;
+  isAdmin: boolean;
+  /** Effective permissions: ADMIN_PERMS for an admin, NO_PERMS when the position is missing or unreadable. */
+  perms: Perms;
 }
 
 export interface Env {

@@ -15,6 +15,8 @@ interface Row {
   status: string;
   joined_on: string | null;
   kind: string | null;
+  position_id: string | null;
+  position_name: string | null;
 }
 
 export const people = new Hono<AppEnv>();
@@ -22,14 +24,18 @@ export const people = new Hono<AppEnv>();
 people.get("/", requireUser, async (c) => {
   const priv = canSeePeoplePrivate(c.var.user!);
   const { results } = await c.env.DB.prepare(
-    `SELECT id, name, role, dept, title, phone, email, manager_id, status, joined_on, kind
-       FROM users ${priv ? "" : "WHERE status != 'left'"} ORDER BY name COLLATE NOCASE`,
+    `SELECT u.id, u.name, u.role, u.dept, u.title, u.phone, u.email, u.manager_id, u.status, u.joined_on, u.kind,
+            u.position_id, p.name AS position_name
+       FROM users u LEFT JOIN positions p ON p.id = u.position_id
+       ${priv ? "" : "WHERE u.status != 'left'"} ORDER BY u.name COLLATE NOCASE`,
   ).all<Row>();
   return c.json({
     people: results.map((r) => ({
       id: r.id,
       name: r.name,
       role: r.role,
+      positionId: r.position_id,
+      positionName: r.position_name,
       dept: r.dept,
       title: r.title,
       phone: r.phone,

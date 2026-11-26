@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Empty } from "./Icon";
 import { Pill, taskTone } from "./Pill";
 import { fmtDay } from "../lib/tasks";
 import type { Task } from "../lib/tasks";
@@ -10,7 +11,7 @@ interface Props {
 }
 
 export function TaskList({ tasks, onOpen, empty }: Props) {
-  if (tasks.length === 0) return <div className="empty">{empty ?? "No tasks here."}</div>;
+  if (tasks.length === 0) return <Empty icon="tasks"><p>{empty ?? "No tasks here."}</p></Empty>;
   return (
     <div className="table-wrap">
       <table className="stack">

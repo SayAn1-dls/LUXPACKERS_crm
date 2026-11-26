@@ -1,10 +1,14 @@
 import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { pollWhileVisible } from "../lib/polling";
 import { useAuth } from "../auth";
 import { ActivityFeed } from "../components/ActivityFeed";
+import { AddPersonDrawer } from "../components/AddPersonDrawer";
+import { Empty, Icon } from "../components/Icon";
+import { SectionHead } from "../components/SectionHead";
+import { Workload, type WorkloadRow } from "../components/Workload";
 import { DeptCards } from "../components/DeptCards";
 import type { DeptStat } from "../components/DeptCards";
 import { Figure, Figures } from "../components/Figure";
@@ -25,7 +29,7 @@ interface Dash {
   departments: DeptStat[];
   latest: AuditItem[];
   reviewQueue: Task[];
-  workload: { userId: string; name: string; open: number; late: number; submitted: number }[];
+  workload: WorkloadRow[];
   pendingLeave: PendingLeaveItem[];
   registers: { id: string; name: string; open: number }[];
   needsOwner: { tasks: number; records: { id: string; name: string; count: number }[] };
@@ -36,7 +40,7 @@ function NeedsOwner({ d }: { d: Dash["needsOwner"] }) {
   const nothing = d.tasks === 0 && recs.length === 0;
   return (
     <section className="section">
-      <div className="section-head"><h2>Needs an owner</h2></div>
+      <SectionHead icon="people" title="Needs an owner" />
       <div className="card card-pad">
         {nothing ? (
           <p className="muted small" style={{ margin: 0 }}>Every open task and record has an owner.</p>
@@ -61,10 +65,35 @@ function NeedsOwner({ d }: { d: Dash["needsOwner"] }) {
   );
 }
 
+/** A CSS-only scrolling strip of today's numbers. Decorative: the same figures are below. */
+function Ticker({ f }: { f: Dash["figures"] }) {
+  const items: [string, string][] = [
+    [String(f.openTasks), "open tasks"],
+    [String(f.late), "overdue"],
+    [String(f.waiting), "waiting on someone"],
+    [String(f.openEnquiries), "open enquiries"],
+    [moneyShort(f.receivedThisMonth), "received this month"],
+    [`${f.tripsLive}/${f.tripsTotal}`, "trips live"],
+    ["", "Not just a trip. An experience."],
+  ];
+  const list = (hidden: boolean) => (
+    <ul aria-hidden={hidden || undefined}>
+      {items.map(([n, l]) => <li key={l}>{n && <b>{n}</b>}{l}</li>)}
+    </ul>
+  );
+  return (
+    <div className="ticker" aria-hidden="true">
+      <div className="ticker-track">{list(false)}{list(true)}</div>
+    </div>
+  );
+}
+
 export function AdminHome() {
   const { user } = useAuth();
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const navigate = useNavigate();
   useTitle("Home");
   const closeDrawer = useCallback(() => { setOpenId(null); setCreating(false); }, []);
   const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => api<Dash>("GET", "/dashboard"), refetchInterval: pollWhileVisible });
@@ -89,16 +118,29 @@ export function AdminHome() {
           <h1>{greeting()}, {user?.name.split(" ")[0]}</h1>
           {f && <p>{f.openTasks} open tasks across the company{f.late ? `, ${f.late} overdue` : ", none overdue"}. {f.tripsLive} of {f.tripsTotal} trips are live on the website.</p>}
         </div>
-        <div className="actions">
-          <button type="button" className="btn" onClick={() => setCreating(true)}>New task</button>
-          <Link className="btn quiet" to="/registers/leads">Enquiries</Link>
-        </div>
+      </div>
+
+      {f && <Ticker f={f} />}
+
+      <div className="big-actions">
+        <button type="button" className="big-action" onClick={() => setAdding(true)}>
+          <span className="ba-icon"><Icon name="userPlus" size={22} /></span>
+          <span><b>Add a person</b><span>Give someone a sign-in and a position.</span></span>
+        </button>
+        <button type="button" className="big-action" onClick={() => navigate("/positions?new=1")}>
+          <span className="ba-icon"><Icon name="badge" size={22} /></span>
+          <span><b>Create a position</b><span>Choose what a post can open.</span></span>
+        </button>
+        <button type="button" className="big-action" onClick={() => setCreating(true)}>
+          <span className="ba-icon"><Icon name="tasks" size={22} /></span>
+          <span><b>Assign a task</b><span>Give work to anyone, with a date.</span></span>
+        </button>
       </div>
 
       {dash.isPending ? (
-        <div className="empty">Getting the company's day ready…</div>
+        <div className="card"><Empty icon="sparkle">Getting the company's day ready…</Empty></div>
       ) : dash.isError || !d || !f ? (
-        <div className="empty"><h3>Could not load the overview</h3><p>Refresh the page to try again.</p></div>
+        <div className="card"><Empty icon="inbox" title="Could not load the overview"><p>Refresh the page to try again.</p></Empty></div>
       ) : (
         <>
           <Figures>
@@ -112,7 +154,7 @@ export function AdminHome() {
 
           <div className="grid-2 section">
             <section className="card card-pad">
-              <div className="section-head"><h2>Needs attention</h2><Link to="/tasks?tab=all">All tasks</Link></div>
+              <SectionHead icon="tasks" title="Needs attention"><Link to="/tasks?tab=all">All tasks</Link></SectionHead>
               {d.attention.length === 0 ? (
                 <p className="muted small" style={{ margin: 0 }}>Nothing needs attention right now.</p>
               ) : (
@@ -130,7 +172,7 @@ export function AdminHome() {
             </section>
             <div style={{ display: "grid", gap: 24, alignContent: "start" }}>
               <section className="card card-pad">
-                <div className="section-head"><h2>Next seven days</h2></div>
+                <SectionHead icon="leave" title="Next seven days" />
                 {d.next7.length === 0 ? (
                   <p className="muted small" style={{ margin: 0 }}>Nothing is due in the next seven days.</p>
                 ) : (
@@ -145,7 +187,7 @@ export function AdminHome() {
                 )}
               </section>
               <section className="card card-pad">
-                <div className="section-head"><h2>Latest changes</h2><Link to="/audit">Audit log</Link></div>
+                <SectionHead icon="log" title="Latest changes"><Link to="/audit">Audit log</Link></SectionHead>
                 <ActivityFeed items={d.latest} />
               </section>
             </div>
@@ -154,39 +196,21 @@ export function AdminHome() {
           <NeedsOwner d={d.needsOwner} />
 
           <section className="section">
-            <div className="section-head"><h2>Waiting for review</h2></div>
+            <SectionHead icon="check" title="Waiting for review" />
             <div className="card card-pad"><ReviewQueue tasks={d.reviewQueue} onOpen={setOpenId} /></div>
           </section>
 
           <div className="grid-2 section">
             <section>
-              <div className="section-head"><h2>Team workload</h2><Link to="/tasks?tab=all">All tasks</Link></div>
+              <SectionHead icon="people" title="Team workload"><Link to="/tasks?tab=all">All tasks</Link></SectionHead>
               <div className="card">
-                {d.workload.length === 0 ? (
-                  <div className="empty">No one else is on the team yet.</div>
-                ) : (
-                  <div className="table-wrap">
-                    <table className="stack">
-                      <thead><tr><th>Person</th><th className="num">Open</th><th className="num">Late</th><th className="num">Submitted</th></tr></thead>
-                      <tbody>
-                        {d.workload.map((w) => (
-                          <tr key={w.userId} style={{ cursor: "default" }}>
-                            <td data-l="Person">{w.name}</td>
-                            <td data-l="Open" className="num">{w.open}</td>
-                            <td data-l="Late" className={`num${w.late ? " late" : " muted"}`}>{w.late}</td>
-                            <td data-l="Submitted" className={`num${w.submitted ? "" : " muted"}`}>{w.submitted}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <Workload rows={d.workload} tab="all" />
               </div>
             </section>
             <aside>
-              <div className="section-head"><h2>Leave to decide</h2><Link to="/leave">Leave</Link></div>
+              <SectionHead icon="leave" title="Leave to decide"><Link to="/leave">Leave</Link></SectionHead>
               <div className="card card-pad"><PendingLeave items={d.pendingLeave} /></div>
-              <div className="section-head" style={{ marginTop: 28 }}><h2>Registers</h2></div>
+              <div style={{ marginTop: 28 }}><SectionHead icon="folder" title="Registers" /></div>
               <div className="card card-pad">
                 <ul className="upcoming">
                   {d.registers.map((r) => (
@@ -201,13 +225,14 @@ export function AdminHome() {
           </div>
 
           <section className="section">
-            <div className="section-head"><h2>Departments</h2></div>
+            <SectionHead icon="folder" title="Departments" />
             <DeptCards departments={d.departments} />
           </section>
         </>
       )}
       {openId && <TaskDrawer key={openId} taskId={openId} onClose={closeDrawer} />}
       {creating && <TaskDrawer key="new" onClose={closeDrawer} />}
+      {adding && <AddPersonDrawer onClose={() => setAdding(false)} />}
     </>
   );
 }
