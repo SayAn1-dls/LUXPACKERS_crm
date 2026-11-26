@@ -28,8 +28,8 @@ export function Shell() {
       {open && <div className="side-scrim" onClick={() => setOpen(false)} aria-hidden="true" />}
       <div className="main">
         <header className="topbar">
-          <button type="button" className="btn quiet menu-btn" aria-expanded={open} aria-controls="side" onClick={() => setOpen((o) => !o)}>
-            <Icon name="menu" size={18} />Menu
+          <button type="button" className="btn quiet menu-btn" aria-label="Menu" aria-expanded={open} aria-controls="side" onClick={() => setOpen((o) => !o)}>
+            <Icon name="menu" size={18} /><span className="menu-label">Menu</span>
           </button>
           <Search />
           <span className="spacer" />
