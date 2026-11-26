@@ -27,7 +27,7 @@ people.get("/", requireUser, async (c) => {
     `SELECT u.id, u.name, u.role, u.dept, u.title, u.phone, u.email, u.manager_id, u.status, u.joined_on, u.kind,
             u.position_id, p.name AS position_name
        FROM users u LEFT JOIN positions p ON p.id = u.position_id
-       ${priv ? "" : "WHERE u.status != 'left'"} ORDER BY u.name COLLATE NOCASE`,
+       WHERE u.approval = 'approved' ${priv ? "" : "AND u.status != 'left'"} ORDER BY u.name COLLATE NOCASE`,
   ).all<Row>();
   return c.json({
     people: results.map((r) => ({

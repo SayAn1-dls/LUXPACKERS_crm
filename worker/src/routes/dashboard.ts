@@ -53,7 +53,7 @@ async function workload(db: D1Database, u: SessionUser) {
          COALESCE(SUM(t.status != 'Done' AND t.due IS NOT NULL AND t.due < ?), 0) AS late,
          COALESCE(SUM(t.status = 'Submitted'), 0) AS submitted
        FROM users p LEFT JOIN tasks t ON t.assignee_id = p.id
-       WHERE p.status != 'left' AND p.id != ? ${team} GROUP BY p.id ORDER BY p.name COLLATE NOCASE`,
+       WHERE p.status != 'left' AND p.approval = 'approved' AND p.id != ? ${team} GROUP BY p.id ORDER BY p.name COLLATE NOCASE`,
     )
     .bind(today, u.id, ...(everyone ? [] : [u.dept, u.id]))
     .all<{ id: string; name: string; open: number; late: number; submitted: number }>();
@@ -84,12 +84,12 @@ async function hrSections(db: D1Database, today: string) {
     .prepare(
       `SELECT p.id, p.name, p.joined_on,
          (SELECT COUNT(*) FROM onboarding o WHERE o.user_id = p.id AND o.done = 1) AS done
-       FROM users p WHERE p.status = 'onboarding' ORDER BY p.joined_on IS NULL, p.joined_on, p.name COLLATE NOCASE`,
+       FROM users p WHERE p.status = 'onboarding' AND p.approval = 'approved' ORDER BY p.joined_on IS NULL, p.joined_on, p.name COLLATE NOCASE`,
     )
     .all<{ id: string; name: string; joined_on: string | null; done: number }>();
   const { results: soon } = await db
     .prepare(
-      `SELECT id, name, joined_on FROM users WHERE status != 'left' AND joined_on >= ? AND joined_on <= ? ORDER BY joined_on, name COLLATE NOCASE`,
+      `SELECT id, name, joined_on FROM users WHERE status != 'left' AND approval = 'approved' AND joined_on >= ? AND joined_on <= ? ORDER BY joined_on, name COLLATE NOCASE`,
     )
     .bind(today, addDays(today, 30))
     .all<{ id: string; name: string; joined_on: string }>();

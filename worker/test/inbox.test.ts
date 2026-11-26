@@ -110,7 +110,6 @@ describe("onboarding", () => {
     expect((await api(other.cookie, "GET", `/api/onboarding/${joiner.id}`)).status).toBe(403);
     expect((await api(hr.cookie, "GET", "/api/onboarding/nope")).status).toBe(404);
     // self
-    await env.DB.prepare("UPDATE users SET must_change_password = 0 WHERE id = ?").bind(joiner.id).run();
     const { createSession } = await import("../src/lib/session");
     const token = await createSession(env.DB, joiner.id, "t");
     expect((await api(`lux_session=${token}`, "GET", `/api/onboarding/${joiner.id}`)).status).toBe(200);

@@ -25,14 +25,6 @@ export async function createSession(db: D1Database, userId: string, ua: string |
   return token;
 }
 
-export async function destroySessions(db: D1Database, userId: string, exceptTokenHash?: string): Promise<void> {
-  if (exceptTokenHash) {
-    await db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(userId, exceptTokenHash).run();
-  } else {
-    await db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
-  }
-}
-
 export function setSessionCookie(c: AppContext, token: string): void {
   setCookie(c, COOKIE, token, {
     httpOnly: true,
@@ -53,7 +45,7 @@ export async function sessionTokenHash(c: AppContext): Promise<string | null> {
 }
 
 /** Columns needed to build a SessionUser; select FROM users u LEFT JOIN positions p ON p.id = u.position_id. */
-export const SESSION_USER_COLS = `u.id, u.name, u.email, u.dept, u.manager_id, u.must_change_password, u.status, u.totp_enabled_at,
+export const SESSION_USER_COLS = `u.id, u.name, u.email, u.dept, u.manager_id, u.status, u.approval, u.totp_enabled_at,
   p.id AS position_id, p.name AS position_name, p.is_admin AS position_is_admin, p.perms AS position_perms`;
 
 export interface SessionUserRow {
@@ -62,8 +54,8 @@ export interface SessionUserRow {
   email: string;
   dept: string;
   manager_id: string | null;
-  must_change_password: number;
   status: string;
+  approval: string;
   totp_enabled_at: string | null;
   position_id: string | null;
   position_name: string | null;
@@ -81,7 +73,7 @@ export function toSessionUser(r: SessionUserRow): SessionUser {
     role: roleLabel(isAdmin, perms),
     dept: r.dept,
     managerId: r.manager_id,
-    mustChangePassword: r.must_change_password === 1,
+    approval: r.approval === "approved" ? "approved" : "pending",
     positionId: r.position_id,
     positionName: r.position_name,
     isAdmin,
@@ -99,20 +91,31 @@ export async function loadSessionUser(db: D1Database, userId: string): Promise<S
   return row ? toSessionUser(row) : null;
 }
 
+/** People who have left, or whose access request was declined, never keep a session. */
+export const mayHaveSession = (r: { status: string; approval: string }) => r.status !== "left" && r.approval !== "declined";
+
+/** A sign-in within the last 10 minutes: needed before changing how this account signs in. */
+export const FRESH_MS = 10 * 60_000;
+export const isFreshSignIn = (c: AppContext) => {
+  const at = Date.parse(c.var.sessionCreatedAt ?? "");
+  return at > Date.now() - FRESH_MS && at <= Date.now() + 60_000;
+};
+
 export const readSession: MiddlewareHandler<AppEnv> = async (c, next) => {
   c.set("user", null);
+  c.set("sessionCreatedAt", null);
   const token = getCookie(c, COOKIE);
   if (token) {
     const sid = await sha256Hex(token);
     const row = await c.env.DB.prepare(
-      `SELECT s.id AS session_id, s.expires_at, ${SESSION_USER_COLS}
+      `SELECT s.id AS session_id, s.expires_at, s.created_at AS session_created_at, ${SESSION_USER_COLS}
          FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN positions p ON p.id = u.position_id WHERE s.id = ?`,
     )
       .bind(sid)
-      .first<SessionUserRow & { session_id: string; expires_at: string }>();
+      .first<SessionUserRow & { session_id: string; expires_at: string; session_created_at: string }>();
     if (row) {
       const exp = Date.parse(row.expires_at);
-      if (!(exp > Date.now()) || row.status === "left") {
+      if (!(exp > Date.now()) || !mayHaveSession(row)) {
         await c.env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sid).run();
       } else {
         if (exp - Date.now() < SLIDE_BELOW_DAYS * DAY) {
@@ -122,6 +125,7 @@ export const readSession: MiddlewareHandler<AppEnv> = async (c, next) => {
           setSessionCookie(c, token);
         }
         c.set("user", toSessionUser(row));
+        c.set("sessionCreatedAt", row.session_created_at);
       }
     }
   }
@@ -146,24 +150,34 @@ export const csrf: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
-const OPEN_WHEN_MUST_CHANGE = (p: string) =>
-  p === "/api/me" || p === "/api/setup" || p === "/api/health" || p === "/api/auth" || p.startsWith("/api/auth/");
+/** The Google sign-in steps. Reachable by anyone, signed in or not. */
+const SIGN_IN_PATHS = new Set([
+  "/api/auth/google",
+  "/api/auth/google/start",
+  "/api/auth/google/callback",
+  "/api/auth/login/mfa",
+]);
 
-export const mustChangeGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
+/** What someone waiting for approval may reach: who am I, sign out, and the sign-in steps. */
+const OPEN_WHEN_PENDING = (p: string) =>
+  p === "/api/me" || p === "/api/health" || p === "/api/setup" || p === "/api/auth/logout" || SIGN_IN_PATHS.has(p);
+
+/** Signed in with Google but not let in yet: nothing beyond /api/me and sign-out. */
+export const approvalGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
   const u = c.var.user;
-  if (u?.mustChangePassword && !OPEN_WHEN_MUST_CHANGE(new URL(c.req.url).pathname)) {
-    return c.json({ error: "must_change_password" }, 403);
+  if (u && u.approval !== "approved" && !OPEN_WHEN_PENDING(new URL(c.req.url).pathname)) {
+    return c.json({ error: "approval_pending" }, 403);
   }
   await next();
 };
 
-/** What an admin who has not turned on two-step sign-in may still reach: who am I, sign out, password, enrolment. */
+/** What an admin who has not turned on two-step sign-in may still reach: who am I, sign out, sign-in steps, enrolment. */
 const OPEN_WHEN_MFA_SETUP = (p: string) =>
   p === "/api/me" ||
   p === "/api/health" ||
   p === "/api/setup" ||
   p === "/api/auth/logout" ||
-  p === "/api/auth/password" ||
+  SIGN_IN_PATHS.has(p) ||
   p === "/api/auth/mfa" ||
   p.startsWith("/api/auth/mfa/");
 

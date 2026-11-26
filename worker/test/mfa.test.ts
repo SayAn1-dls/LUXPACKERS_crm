@@ -3,9 +3,11 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import app from "../src/index";
 import { base32Decode, base32Encode, hotp, stepAt, totpAt, verifyTotp } from "../src/lib/totp";
 import { api, applyMigrations, makeUser } from "./helpers";
+import { call, claimsFor, cookiesOf, finishFlow, installGoogle, redirectOf, sessionOf, startFlow } from "./google";
 
 beforeAll(async () => {
   await applyMigrations();
+  await installGoogle();
 });
 
 beforeEach(async () => {
@@ -31,10 +33,17 @@ async function enrol(cookie: string) {
   return { secret, backupCodes, step };
 }
 
-async function passwordStep(email: string, password: string) {
-  const r = await api(null, "POST", "/api/auth/login", { email, password });
-  return { r, body: (await r.json()) as any };
+/** The Google step for an existing account (linked by email on first use). With two-step on, `mfa` is the
+    HttpOnly code-step cookie and there is no session yet; otherwise `session` is set. */
+async function googleStep(email: string, over: Partial<typeof env> = {}) {
+  const f = await startFlow();
+  const r = await finishFlow(f, claimsFor(f, `sub-${email}`, email), { over });
+  const m = cookiesOf(r).lux_mfa;
+  return { r, mfa: m?.value ? `lux_mfa=${m.value}` : null, session: sessionOf(r) };
 }
+
+const codeStep = (mfa: string | null, code: string, over: Partial<typeof env> = {}) =>
+  call(mfa, "POST", "/api/auth/login/mfa", { code }, over);
 
 /** Calls the Worker with a changed environment (e.g. no MFA_KEY). */
 function apiWithEnv(over: Partial<typeof env>, cookie: string | null, method: string, path: string, body?: unknown) {
@@ -111,8 +120,8 @@ describe("turning two-step sign-in on", () => {
       `otpauth://totp/Luxpackers:${encodeURIComponent(u.email)}?secret=${secret}&issuer=Luxpackers&algorithm=SHA1&digits=6&period=30`,
     );
 
-    // not on yet: still a plain sign-in
-    expect((await passwordStep(u.email, u.password)).body.user.id).toBe(u.id);
+    // not on yet: Google alone signs in
+    expect((await googleStep(u.email)).session).toBeTruthy();
 
     const wrong = await api(u.cookie, "POST", "/api/auth/mfa/enable", { code: await codeAt(secret, stepAt(Date.now()) + 5) });
     expect(wrong.status).toBe(400);
@@ -170,116 +179,52 @@ describe("turning two-step sign-in on", () => {
 
 /* ---------- sign-in ---------- */
 
-describe("signing in with two-step on", () => {
-  it("password step returns an mfaToken and no cookie; the code step creates the session", async () => {
-    const u = await makeUser("employee", "Sales");
-    const { secret, step } = await enrol(u.cookie);
-    const { r, body } = await passwordStep(u.email, u.password);
-    expect(r.status).toBe(200);
-    expect(r.headers.get("set-cookie")).toBeNull();
-    expect(body.mfaRequired).toBe(true);
-    expect(typeof body.mfaToken).toBe("string");
-    expect(body.user).toBeUndefined();
-    // the token is stored hashed
-    const pending = await env.DB.prepare("SELECT id FROM mfa_pending").all<any>();
-    expect(pending.results).toHaveLength(1);
-    expect(pending.results[0].id).not.toBe(body.mfaToken);
-
-    // the code used to enable it cannot be replayed
-    const replay = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: body.mfaToken, code: await codeAt(secret, step) });
-    expect(replay.status).toBe(401);
-    expect(await replay.json()).toEqual({ error: "bad_code" });
-
-    const wrong = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: body.mfaToken, code: await codeAt(secret, step + 7) });
-    expect(wrong.status).toBe(401);
-
-    const ok = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: body.mfaToken, code: await codeAt(secret, step + 1) });
-    expect(ok.status).toBe(200);
-    const cookie = ok.headers.get("set-cookie")!.split(";")[0];
-    expect(cookie).toContain("lux_session=");
-    expect(((await ok.json()) as any).user.id).toBe(u.id);
-    expect((await api(cookie, "GET", "/api/me")).status).toBe(200);
-
-    // the token is single use
-    const again = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: body.mfaToken, code: await codeAt(secret, step + 1) });
-    expect(again.status).toBe(401);
-    expect(await again.json()).toEqual({ error: "mfa_expired" });
-    // successful sign-in clears the failures
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts").first<{ n: number }>();
-    expect(n?.n).toBe(0);
-  });
-
+describe("signing in with two-step on (after Google)", () => {
   it("the same time-step cannot be used for two sign-ins", async () => {
     const u = await makeUser("employee", "Sales");
     const { secret, step } = await enrol(u.cookie);
-    const a = (await passwordStep(u.email, u.password)).body.mfaToken;
-    const b = (await passwordStep(u.email, u.password)).body.mfaToken;
+    const a = (await googleStep(u.email)).mfa;
     const code = await codeAt(secret, step + 1);
-    expect((await api(null, "POST", "/api/auth/login/mfa", { mfaToken: a, code })).status).toBe(200);
-    expect((await api(null, "POST", "/api/auth/login/mfa", { mfaToken: b, code })).status).toBe(401);
+    expect((await codeStep(a, code)).status).toBe(200);
+    const b = (await googleStep(u.email)).mfa;
+    expect((await codeStep(b, code)).status).toBe(401);
   });
 
   it("a backup code works once", async () => {
     const u = await makeUser("employee", "Sales");
     const { backupCodes } = await enrol(u.cookie);
-    const t1 = (await passwordStep(u.email, u.password)).body.mfaToken;
-    const ok = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t1, code: backupCodes[0].toLowerCase().replace("-", " ") });
+    const ok = await codeStep((await googleStep(u.email)).mfa, backupCodes[0].toLowerCase().replace("-", " "));
     expect(ok.status).toBe(200);
-    const t2 = (await passwordStep(u.email, u.password)).body.mfaToken;
-    const again = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t2, code: backupCodes[0] });
-    expect(again.status).toBe(401);
-    const other = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t2, code: backupCodes[1] });
-    expect(other.status).toBe(200);
+    const t2 = (await googleStep(u.email)).mfa;
+    expect((await codeStep(t2, backupCodes[0])).status).toBe(401);
+    expect((await codeStep(t2, backupCodes[1])).status).toBe(200);
     const status = (await (await api(u.cookie, "GET", "/api/auth/mfa")).json()) as any;
     expect(status.backupCodesLeft).toBe(6);
   });
 
-  it("an expired mfaToken is refused", async () => {
+  it("an expired code step is refused; it lasts five minutes", async () => {
     const u = await makeUser("employee", "Sales");
     const { secret, step } = await enrol(u.cookie);
-    const t = (await passwordStep(u.email, u.password)).body.mfaToken;
-    await env.DB.prepare("UPDATE mfa_pending SET expires_at = ?").bind(new Date(Date.now() - 1000).toISOString()).run();
-    const r = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t, code: await codeAt(secret, step + 1) });
-    expect(r.status).toBe(401);
-    expect(await r.json()).toEqual({ error: "mfa_expired" });
-  });
-
-  it("the token expires five minutes after the password step", async () => {
-    const u = await makeUser("employee", "Sales");
-    await enrol(u.cookie);
-    await passwordStep(u.email, u.password);
+    const t = (await googleStep(u.email)).mfa;
     const row = await env.DB.prepare("SELECT expires_at FROM mfa_pending").first<{ expires_at: string }>();
     const left = Date.parse(row!.expires_at) - Date.now();
     expect(left).toBeGreaterThan(4 * 60_000);
     expect(left).toBeLessThanOrEqual(5 * 60_000);
+    await env.DB.prepare("UPDATE mfa_pending SET expires_at = ?").bind(new Date(Date.now() - 1000).toISOString()).run();
+    const r = await codeStep(t, await codeAt(secret, step + 1));
+    expect(r.status).toBe(401);
+    expect(await r.json()).toEqual({ error: "mfa_expired" });
   });
 
-  it("five wrong codes kill the token, and count toward the email's lockout", async () => {
+  it("five wrong codes kill the code step and lock the account's code checks", async () => {
     const u = await makeUser("employee", "Sales");
     const { secret, step } = await enrol(u.cookie);
-    const t = (await passwordStep(u.email, u.password)).body.mfaToken;
-    for (let i = 0; i < 5; i++) {
-      const r = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t, code: await codeAt(secret, step + 10 + i) });
-      expect(r.status).toBe(401);
-    }
-    const good = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t, code: await codeAt(secret, step + 1) });
-    expect(good.status).toBe(401);
+    const t = (await googleStep(u.email)).mfa;
+    for (let i = 0; i < 5; i++) expect((await codeStep(t, await codeAt(secret, step + 10 + i))).status).toBe(401);
+    const good = await codeStep(t, await codeAt(secret, step + 1));
     expect(await good.json()).toEqual({ error: "mfa_expired" });
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE email = ?").bind(u.email).first<{ n: number }>();
-    expect(n?.n).toBe(5);
-    // the password step is now locked too
-    expect((await passwordStep(u.email, u.password)).r.status).toBe(429);
-  });
-
-  it("the code step is refused while the email is locked out", async () => {
-    const u = await makeUser("employee", "Sales");
-    const { secret, step } = await enrol(u.cookie);
-    const t = (await passwordStep(u.email, u.password)).body.mfaToken;
-    for (let i = 0; i < 5; i++) {
-      await env.DB.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind(u.email, new Date().toISOString()).run();
-    }
-    const r = await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t, code: await codeAt(secret, step + 1) });
-    expect(r.status).toBe(429);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE email = ?").bind(u.email).first<{ n: number }>())?.n).toBe(5);
+    expect((await codeStep((await googleStep(u.email)).mfa, await codeAt(secret, step + 1))).status).toBe(429);
   });
 });
 
@@ -312,7 +257,7 @@ describe("admins must use two-step sign-in", () => {
   it("an admin cannot turn their own two-step sign-in off", async () => {
     const a = await makeUser("admin", "Management", { mfa: false });
     const { secret, step } = await enrol(a.cookie);
-    const r = await api(a.cookie, "POST", "/api/auth/mfa/disable", { password: a.password, code: await codeAt(secret, step + 1) });
+    const r = await api(a.cookie, "POST", "/api/auth/mfa/disable", { code: await codeAt(secret, step + 1) });
     expect(r.status).toBe(403);
     expect(await r.json()).toEqual({ error: "admin_mfa_required" });
     const row = await env.DB.prepare("SELECT totp_enabled_at FROM users WHERE id = ?").bind(a.id).first<any>();
@@ -332,8 +277,8 @@ describe("admins must use two-step sign-in", () => {
     expect(codes?.n).toBe(0);
     const audit = await env.DB.prepare("SELECT user_id, entity_id FROM audit_log WHERE action = 'mfa_reset'").all<any>();
     expect(audit.results).toEqual([{ user_id: a.id, entity_id: u.id }]);
-    // they sign in with just a password again
-    expect((await passwordStep(u.email, u.password)).body.user.id).toBe(u.id);
+    // Google alone signs them in again
+    expect((await googleStep(u.email)).session).toBeTruthy();
   });
 
   it("reset another admin works too (lockout recovery)", async () => {
@@ -368,16 +313,13 @@ describe("admins must use two-step sign-in", () => {
 /* ---------- turning it off, new backup codes ---------- */
 
 describe("non-admins can turn it off", () => {
-  it("needs the password and a current code", async () => {
+  it("needs a current code", async () => {
     const u = await makeUser("employee", "Sales");
     const { secret, step } = await enrol(u.cookie);
-    const badPw = await api(u.cookie, "POST", "/api/auth/mfa/disable", { password: "not-my-password", code: await codeAt(secret, step + 1) });
-    expect(badPw.status).toBe(400);
-    expect(await badPw.json()).toEqual({ error: "wrong_password" });
-    const badCode = await api(u.cookie, "POST", "/api/auth/mfa/disable", { password: u.password, code: await codeAt(secret, step + 9) });
+    const badCode = await api(u.cookie, "POST", "/api/auth/mfa/disable", { code: await codeAt(secret, step + 9) });
     expect(badCode.status).toBe(400);
     expect(await badCode.json()).toEqual({ error: "bad_code" });
-    const ok = await api(u.cookie, "POST", "/api/auth/mfa/disable", { password: u.password, code: await codeAt(secret, step + 1) });
+    const ok = await api(u.cookie, "POST", "/api/auth/mfa/disable", { code: await codeAt(secret, step + 1) });
     expect(ok.status).toBe(200);
     const me = (await (await api(u.cookie, "GET", "/api/me")).json()) as any;
     expect(me.user.mfaEnabled).toBe(false);
@@ -385,7 +327,7 @@ describe("non-admins can turn it off", () => {
     expect(row.totp_secret_enc).toBeNull();
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM mfa_backup_codes").first<{ n: number }>())?.n).toBe(0);
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'mfa_disabled'").first<{ n: number }>())?.n).toBe(1);
-    expect((await passwordStep(u.email, u.password)).body.user.id).toBe(u.id);
+    expect((await googleStep(u.email)).session).toBeTruthy();
   });
 });
 
@@ -401,9 +343,23 @@ describe("new backup codes", () => {
     expect(backupCodes).toHaveLength(8);
     expect(backupCodes.some((c) => old.includes(c))).toBe(false);
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'backup_codes_regenerated'").first<{ n: number }>())?.n).toBe(1);
-    const t = (await passwordStep(u.email, u.password)).body.mfaToken;
-    expect((await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t, code: old[0] })).status).toBe(401);
-    expect((await api(null, "POST", "/api/auth/login/mfa", { mfaToken: t, code: backupCodes[0] })).status).toBe(200);
+    const t = (await googleStep(u.email)).mfa;
+    expect((await codeStep(t, old[0])).status).toBe(401);
+    expect((await codeStep(t, backupCodes[0])).status).toBe(200);
+  });
+
+  it("are not made when two-step sign-in was reset in the meantime", async () => {
+    const u = await makeUser("employee", "Sales");
+    const { secret, step } = await enrol(u.cookie);
+    const { backupCodeStmts } = await import("../src/lib/mfa");
+    // The condition the inserts carry: nothing is written once totp_enabled_at is gone.
+    await env.DB.prepare("UPDATE users SET totp_enabled_at = NULL WHERE id = ?").bind(u.id).run();
+    const on = { sql: "EXISTS (SELECT 1 FROM users WHERE id = ? AND totp_enabled_at IS NOT NULL)", args: [u.id] };
+    await env.DB.prepare("DELETE FROM mfa_backup_codes").run();
+    await env.DB.batch(await backupCodeStmts(env.DB, u.id, ["ABCD-EFGH"], new Date().toISOString(), on));
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM mfa_backup_codes").first<{ n: number }>())?.n).toBe(0);
+    const r = await api(u.cookie, "POST", "/api/auth/mfa/backup-codes", { code: await codeAt(secret, step + 1) });
+    expect(r.status).toBe(400);
   });
 });
 
@@ -419,10 +375,9 @@ describe("without MFA_KEY it fails closed", () => {
       expect(s.status).toBe(500);
       expect(await s.json()).toEqual({ error: "mfa_not_configured" });
 
-      const p = await apiWithEnv(over, null, "POST", "/api/auth/login", { email: u.email, password: u.password });
-      const { mfaToken } = (await p.json()) as any;
-      expect(mfaToken).toBeTruthy();
-      const c = await apiWithEnv(over, null, "POST", "/api/auth/login/mfa", { mfaToken, code: await codeAt(secret, step + 1) });
+      const { mfa: mfaCookie, r: p } = await googleStep(u.email, over);
+      expect(redirectOf(p)).toBe("/login/code");
+      const c = await codeStep(mfaCookie, await codeAt(secret, step + 1), over);
       expect(c.status).toBe(500);
       expect(await c.json()).toEqual({ error: "mfa_not_configured" });
       expect(c.headers.get("set-cookie")).toBeNull();

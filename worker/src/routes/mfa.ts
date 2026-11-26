@@ -4,38 +4,37 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { auditStmt, auditStmtWhen } from "../lib/audit";
-import { verifyPassword } from "../lib/crypto";
 import {
   backupCodeStmts,
+  clearAttemptsStmt,
   decryptSecret,
   encryptSecret,
-  failedAttemptStmts,
   generateBackupCodes,
-  lockedOut,
   mfaKey,
+  takeAttempt,
   useCode,
   useTotp,
   type MfaRow,
 } from "../lib/mfa";
-import { requireUser } from "../lib/session";
+import { isFreshSignIn, requireUser, sessionTokenHash } from "../lib/session";
 import { generateSecret, otpauthUri, verifyTotp } from "../lib/totp";
 
 const CodeBody = z.object({ code: z.string().trim().min(1).max(40) });
-const DisableBody = z.object({ password: z.string().min(1).max(500), code: z.string().trim().min(1).max(40) });
 
 interface Row extends MfaRow {
   name: string;
   email: string;
-  password_hash: string;
 }
 
 const loadRow = (db: D1Database, id: string) =>
   db
-    .prepare("SELECT id, name, email, password_hash, totp_secret_enc, totp_enabled_at, totp_last_step FROM users WHERE id = ?")
+    .prepare("SELECT id, name, email, totp_secret_enc, totp_enabled_at, totp_last_step FROM users WHERE id = ?")
     .bind(id)
     .first<Row>();
 
 const NOT_CONFIGURED = { error: "mfa_not_configured" } as const;
+/** Turning two-step sign-in on needs a Google sign-in in the last 10 minutes, so a stolen session cannot enrol its own phone. */
+const REAUTH = { error: "reauth_required" } as const;
 
 export const mfa = new Hono<AppEnv>();
 
@@ -61,6 +60,7 @@ mfa.get("/", async (c) => {
 /** Starts (or restarts) enrolment: a fresh secret, stored encrypted, not active until /enable. */
 mfa.post("/setup", async (c) => {
   const user = c.var.user!;
+  if (!isFreshSignIn(c)) return c.json(REAUTH, 403);
   const key = await mfaKey(c.env);
   if (!key) return c.json(NOT_CONFIGURED, 500);
   const db = c.env.DB;
@@ -73,9 +73,10 @@ mfa.post("/setup", async (c) => {
   return c.json({ secret, uri: otpauthUri(user.email, secret) });
 });
 
-/** Confirms enrolment with a current code. Returns the backup codes, shown once. */
+/** Confirms enrolment with a current code. Returns the backup codes, shown once. Signs out every other session. */
 mfa.post("/enable", async (c) => {
   const user = c.var.user!;
+  if (!isFreshSignIn(c)) return c.json(REAUTH, 403);
   const key = await mfaKey(c.env);
   if (!key) return c.json(NOT_CONFIGURED, 500);
   const parsed = CodeBody.safeParse(await c.req.json().catch(() => null));
@@ -101,6 +102,8 @@ mfa.post("/enable", async (c) => {
       )
       .bind(now, step, now, user.id, row.totp_secret_enc),
     db.prepare(`DELETE FROM mfa_backup_codes WHERE user_id = ? AND ${done.sql}`).bind(user.id, ...done.args),
+    db.prepare(`DELETE FROM sessions WHERE user_id = ? AND id != ? AND ${done.sql}`).bind(user.id, (await sessionTokenHash(c)) ?? "", ...done.args),
+    db.prepare(`DELETE FROM mfa_pending WHERE user_id = ? AND ${done.sql}`).bind(user.id, ...done.args),
     ...(await backupCodeStmts(db, user.id, codes, now, done)),
     auditStmtWhen(db, done, user, "mfa_enabled", "user", user.id, user.name),
   ]);
@@ -118,42 +121,37 @@ mfa.post("/backup-codes", async (c) => {
   const db = c.env.DB;
   const row = await loadRow(db, user.id);
   if (!row?.totp_enabled_at) return c.json({ error: "not_enabled" }, 400);
-  if (await lockedOut(db, row.email)) return c.json({ error: "locked" }, 429);
-  if (!(await useTotp(db, key, row, parsed.data.code))) {
-    await db.batch(failedAttemptStmts(db, row.email));
-    return c.json({ error: "bad_code" }, 400);
-  }
+  if (!(await takeAttempt(db, row.email))) return c.json({ error: "locked" }, 429);
+  if (!(await useTotp(db, key, row, parsed.data.code))) return c.json({ error: "bad_code" }, 400);
   const now = new Date().toISOString();
   const codes = generateBackupCodes();
-  await db.batch([
-    db.prepare("DELETE FROM mfa_backup_codes WHERE user_id = ?").bind(user.id),
-    ...(await backupCodeStmts(db, user.id, codes, now)),
-    auditStmt(db, user, "backup_codes_regenerated", "user", user.id, user.name),
+  // Only while two-step sign-in is still on (an admin reset may have landed in between).
+  const on = { sql: "EXISTS (SELECT 1 FROM users WHERE id = ? AND totp_enabled_at IS NOT NULL)", args: [user.id] };
+  const res = await db.batch([
+    clearAttemptsStmt(db, row.email),
+    db.prepare(`DELETE FROM mfa_backup_codes WHERE user_id = ? AND ${on.sql}`).bind(user.id, ...on.args),
+    ...(await backupCodeStmts(db, user.id, codes, now, on)),
+    auditStmtWhen(db, on, user, "backup_codes_regenerated", "user", user.id, user.name),
   ]);
+  if (res[res.length - 1].meta.changes !== 1) return c.json({ error: "not_enabled" }, 400);
   return c.json({ backupCodes: codes });
 });
 
-/** Turn off: password plus a current code (or a backup code). Admins cannot. */
+/** Turn off: a current code (or a backup code). Admins cannot. */
 mfa.post("/disable", async (c) => {
   const user = c.var.user!;
   if (user.mfaRequired) return c.json({ error: "admin_mfa_required" }, 403);
   const key = await mfaKey(c.env);
   if (!key) return c.json(NOT_CONFIGURED, 500);
-  const parsed = DisableBody.safeParse(await c.req.json().catch(() => null));
+  const parsed = CodeBody.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "invalid" }, 400);
   const db = c.env.DB;
   const row = await loadRow(db, user.id);
   if (!row?.totp_enabled_at) return c.json({ error: "not_enabled" }, 400);
-  if (await lockedOut(db, row.email)) return c.json({ error: "locked" }, 429);
-  if (!(await verifyPassword(parsed.data.password, row.password_hash))) {
-    await db.batch(failedAttemptStmts(db, row.email));
-    return c.json({ error: "wrong_password" }, 400);
-  }
-  if (!(await useCode(db, key, row, parsed.data.code, true))) {
-    await db.batch(failedAttemptStmts(db, row.email));
-    return c.json({ error: "bad_code" }, 400);
-  }
+  if (!(await takeAttempt(db, row.email))) return c.json({ error: "locked" }, 429);
+  if (!(await useCode(db, key, row, parsed.data.code, true))) return c.json({ error: "bad_code" }, 400);
   await db.batch([
+    clearAttemptsStmt(db, row.email),
     db
       .prepare("UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = NULL, updated_at = ? WHERE id = ?")
       .bind(new Date().toISOString(), user.id),

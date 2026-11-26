@@ -285,20 +285,19 @@ describe("people: addPeople and private fields", () => {
     name: "Asha Rao", email: `asha-${crypto.randomUUID().slice(0, 6)}@example.com`, dept: "Operations", kind: "Full-time", status: "active", ...over,
   });
 
-  it("addPeople creates Employee-position accounts only, with a generated password", async () => {
+  it("addPeople creates Employee-position accounts only, with no password", async () => {
     const hr = await makeUser("hr", "People & Interns");
     const ok = await api(hr.cookie, "POST", "/api/users", newUser());
     expect(ok.status).toBe(201);
     const body = await json(ok);
     expect(body.user).toMatchObject({ positionId: "pos_employee", positionName: "Employee", role: "employee", isAdmin: false });
-    expect(body.tempPassword).toBeTruthy();
+    expect(body.tempPassword).toBeUndefined();
     expect((await api(hr.cookie, "POST", "/api/users", newUser({ positionId: "pos_employee" }))).status).toBe(201);
     for (const positionId of ["pos_manager", "pos_hr", "pos_admin"]) {
       expect((await api(hr.cookie, "POST", "/api/users", newUser({ positionId }))).status).toBe(403);
     }
-    // Choosing the password, or waiving the change at first sign-in, is admin-only.
-    expect((await api(hr.cookie, "POST", "/api/users", newUser({ password: "a-long-password" }))).status).toBe(403);
-    expect((await api(hr.cookie, "POST", "/api/users", newUser({ mustChangePassword: false }))).status).toBe(403);
+    // There are no passwords any more.
+    expect((await api(hr.cookie, "POST", "/api/users", newUser({ password: "a-long-password" }))).status).toBe(410);
   });
 
   it("a non-admin creating an account notifies every active admin (and people=full); an admin creating one does not notify admins", async () => {
@@ -336,29 +335,20 @@ describe("people: addPeople and private fields", () => {
     expect((await api(basic.cookie, "PATCH", `/api/onboarding/${basic.id}`, { step: "Policies read", done: true })).status).toBe(403);
   });
 
-  it("admin creates with any position and a typed password; no temp password returned", async () => {
+  it("admin creates with any position; unknown position is rejected", async () => {
     const admin = await makeUser("admin", "Management");
     const id = (await json(await api(admin.cookie, "POST", "/api/positions", { name: "Finance Head", perms: perms({ registers: { finance: "manage" } }) }))).position.id;
-    const res = await api(admin.cookie, "POST", "/api/users", newUser({ email: "fh@example.com", positionId: id, password: "typed-by-admin", mustChangePassword: false }));
+    const res = await api(admin.cookie, "POST", "/api/users", newUser({ email: "fh@example.com", positionId: id }));
     expect(res.status).toBe(201);
     const body = await json(res);
-    expect(body.tempPassword).toBeUndefined();
     expect(body.user).toMatchObject({ positionId: id, positionName: "Finance Head" });
-    expect(JSON.stringify(body)).not.toMatch(/hash|salt|typed-by-admin/);
-    const login = await api(null, "POST", "/api/auth/login", { email: "fh@example.com", password: "typed-by-admin" });
-    expect(login.status).toBe(200);
-    expect((await json(login)).user).toMatchObject({ mustChangePassword: false, positionId: id });
-    expect(JSON.stringify(await env.DB.prepare("SELECT * FROM audit_log").all())).not.toContain("typed-by-admin");
-    // Default is must-change; too-short password and unknown position are rejected.
-    await api(admin.cookie, "POST", "/api/users", newUser({ email: "mc@example.com", password: "typed-by-admin" }));
-    expect((await env.DB.prepare("SELECT must_change_password AS m FROM users WHERE email = 'mc@example.com'").first<any>()).m).toBe(1);
-    expect((await api(admin.cookie, "POST", "/api/users", newUser({ password: "short" }))).status).toBe(400);
+    expect(JSON.stringify(body)).not.toMatch(/hash|salt|password/);
     expect((await api(admin.cookie, "POST", "/api/users", newUser({ positionId: "pos_nope" }))).status).toBe(400);
   });
 });
 
-describe("admin sets email and password", () => {
-  it("email change: unique (409 email_taken), normalised, new email signs in", async () => {
+describe("admin sets email", () => {
+  it("email change: unique (409 email_taken), normalised; HR cannot", async () => {
     const admin = await makeUser("admin", "Management");
     const emp = await makeUser("employee", "Operations");
     const other = await makeUser("employee", "Operations");
@@ -368,51 +358,8 @@ describe("admin sets email and password", () => {
     const ok = await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { email: " New.Address@Example.com " });
     expect(ok.status).toBe(200);
     expect((await json(ok)).user.email).toBe("new.address@example.com");
-    expect((await api(null, "POST", "/api/auth/login", { email: "new.address@example.com", password: emp.password })).status).toBe(200);
     const hr = await makeUser("hr", "People & Interns");
     expect((await api(hr.cookie, "PATCH", `/api/users/${emp.id}`, { email: "x@example.com" })).status).toBe(403);
-  });
-
-  it("POST /:id/password: old sessions 401, new password signs in, must-change default on, audited without the password", async () => {
-    const admin = await makeUser("admin", "Management");
-    const emp = await makeUser("employee", "Operations");
-    const res = await api(admin.cookie, "POST", `/api/users/${emp.id}/password`, { password: "brand-new-secret" });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
-    expect((await api(emp.cookie, "GET", "/api/me")).status).toBe(401);
-    expect((await api(null, "POST", "/api/auth/login", { email: emp.email, password: emp.password })).status).toBe(401);
-    expect((await api(null, "POST", "/api/auth/login", { email: emp.email, password: "brand-new-secret" })).status).toBe(200);
-    expect((await env.DB.prepare("SELECT must_change_password AS m FROM users WHERE id = ?").bind(emp.id).first<any>()).m).toBe(1);
-    await api(admin.cookie, "POST", `/api/users/${emp.id}/password`, { password: "another-secret!", mustChange: false });
-    expect((await env.DB.prepare("SELECT must_change_password AS m FROM users WHERE id = ?").bind(emp.id).first<any>()).m).toBe(0);
-    const audits = await env.DB.prepare("SELECT detail FROM audit_log WHERE action = 'password_set'").all<any>();
-    expect(audits.results.length).toBe(2);
-    expect(JSON.stringify(audits.results)).not.toMatch(/brand-new-secret|another-secret/);
-  });
-
-  it("POST /:id/password: validation and access", async () => {
-    const admin = await makeUser("admin", "Management");
-    const hr = await makeUser("hr", "People & Interns");
-    const emp = await makeUser("employee", "Operations");
-    expect((await api(admin.cookie, "POST", `/api/users/${emp.id}/password`, { password: "short" })).status).toBe(400);
-    expect((await api(admin.cookie, "POST", `/api/users/nope/password`, { password: "long-enough-1" })).status).toBe(404);
-    expect((await api(admin.cookie, "POST", `/api/users/${admin.id}/password`, { password: "long-enough-1" })).status).toBe(403);
-    expect((await api(hr.cookie, "POST", `/api/users/${emp.id}/password`, { password: "long-enough-1" })).status).toBe(403);
-    expect((await api(emp.cookie, "POST", `/api/users/${emp.id}/password`, { password: "long-enough-1" })).status).toBe(403);
-  });
-
-  it("PATCH with password works the same; mustChangePassword alone is invalid", async () => {
-    const admin = await makeUser("admin", "Management");
-    const emp = await makeUser("employee", "Operations");
-    expect((await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { mustChangePassword: false })).status).toBe(400);
-    const r = await api(admin.cookie, "PATCH", `/api/users/${emp.id}`, { password: "patched-secret", mustChangePassword: false, title: "Lead" });
-    expect(r.status).toBe(200);
-    expect(JSON.stringify(await r.json())).not.toMatch(/hash|salt|patched-secret/);
-    expect((await api(emp.cookie, "GET", "/api/me")).status).toBe(401);
-    expect((await api(null, "POST", "/api/auth/login", { email: emp.email, password: "patched-secret" })).status).toBe(200);
-    const audits = await env.DB.prepare("SELECT action, detail FROM audit_log ORDER BY action").all<any>();
-    expect(audits.results.map((a) => a.action).filter((a) => a !== "login")).toEqual(["password_set", "user_updated"]);
-    expect(JSON.parse(audits.results.find((a) => a.action === "user_updated").detail).fields).toEqual(["title"]);
   });
 });
 
@@ -423,7 +370,7 @@ describe("no side effects when the write does not happen", () => {
     // Simulates losing the last-admin race: the guarded UPDATE changes no row.
     await env.DB.prepare(`CREATE TRIGGER skip_b BEFORE UPDATE ON users WHEN OLD.id = '${b.id}' BEGIN SELECT RAISE(IGNORE); END`).run();
     try {
-      for (const body of [{ status: "left" }, { positionId: "pos_employee", password: "new-password-1", title: "x" }]) {
+      for (const body of [{ status: "left" }, { positionId: "pos_employee", title: "x" }]) {
         const r = await api(a.cookie, "PATCH", `/api/users/${b.id}`, body);
         expect(r.status).toBe(409);
         expect(await r.json()).toEqual({ error: "last_admin" });
@@ -503,7 +450,7 @@ describe("/api/me", () => {
     expect(text).not.toMatch(/hash|salt|password_|totp|secret/);
     const { user } = JSON.parse(text);
     expect(Object.keys(user).sort()).toEqual(
-      ["dept", "email", "id", "isAdmin", "managerId", "mfaEnabled", "mfaRequired", "mustChangePassword", "name", "perms", "positionId", "positionName", "role"].sort(),
+      ["approval", "dept", "email", "id", "isAdmin", "managerId", "mfaEnabled", "mfaRequired", "name", "perms", "positionId", "positionName", "role"].sort(),
     );
     expect(user).toMatchObject({ isAdmin: false, positionId: "pos_employee", positionName: "Employee", role: "employee" });
     expect(user.perms).toEqual(STARTER_POSITIONS.find((p) => p.id === "pos_employee")!.perms);

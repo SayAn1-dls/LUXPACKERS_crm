@@ -72,8 +72,8 @@ const envelopeField = (e: z.ZodError) => {
 const invalid = (c: Ctx, field?: string) => c.json(field ? { error: "invalid", field } : { error: "invalid" }, 400);
 
 async function ownerOk(db: D1Database, id: string) {
-  const o = await db.prepare("SELECT status FROM users WHERE id = ?").bind(id).first<{ status: string }>();
-  return !!o && o.status !== "left";
+  const o = await db.prepare("SELECT status, approval FROM users WHERE id = ?").bind(id).first<{ status: string; approval: string }>();
+  return !!o && o.status !== "left" && o.approval === "approved";
 }
 
 /** Resolves the register and checks read access. Returns a Response on failure. */

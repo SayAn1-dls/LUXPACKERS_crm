@@ -8,8 +8,15 @@ export default defineConfig(async () => {
     plugins: [
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
-        // MFA_KEY here is a throwaway test-only key (base64 of 32 bytes), never used anywhere real.
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations, MFA_KEY: "dGVzdC1vbmx5LW1mYS1rZXktMzItYnl0ZXMtbG9uZyE=" } },
+        // MFA_KEY and the Google client here are throwaway test-only values, never used anywhere real.
+        miniflare: {
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            MFA_KEY: "dGVzdC1vbmx5LW1mYS1rZXktMzItYnl0ZXMtbG9uZyE=",
+            GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com",
+            GOOGLE_CLIENT_SECRET: "test-only-client-secret",
+          },
+        },
       }),
     ],
     test: { include: ["worker/test/**/*.test.ts"], setupFiles: [] },

@@ -4,25 +4,32 @@ import type { Env } from "../env";
 import { fromB64, sha256Hex, toB64 } from "./crypto";
 import { verifyTotp } from "./totp";
 
-/* ---------- sign-in lockout (shared by the password step and every code check) ---------- */
+/* ---------- per-account code limit (every code check, signed in or not) ---------- */
 
 export const MAX_FAILED = 5;
 export const WINDOW_MS = 15 * 60_000;
 
-export async function lockedOut(db: D1Database, email: string): Promise<boolean> {
-  const since = new Date(Date.now() - WINDOW_MS).toISOString();
-  const r = await db.prepare("SELECT COUNT(*) AS n FROM login_attempts WHERE email = ? AND at > ?").bind(email, since).first<{ n: number }>();
-  return (r?.n ?? 0) >= MAX_FAILED;
+/**
+ * Takes one try for this account before a code is checked: a row in login_attempts, inserted only while fewer than
+ * MAX_FAILED are in the window. The count and the insert are one statement, so parallel requests cannot get more
+ * than MAX_FAILED tries between them. False = locked out. Call clearAttempts after a right code.
+ */
+export async function takeAttempt(db: D1Database, email: string): Promise<boolean> {
+  const now = Date.now();
+  const since = new Date(now - WINDOW_MS).toISOString();
+  const res = await db.batch([
+    db.prepare("DELETE FROM login_attempts WHERE email = ? AND at <= ?").bind(email, since),
+    db
+      .prepare(
+        `INSERT INTO login_attempts (email, at) SELECT ?, ?
+          WHERE (SELECT COUNT(*) FROM login_attempts WHERE email = ? AND at > ?) < ?`,
+      )
+      .bind(email, new Date(now).toISOString(), email, since, MAX_FAILED),
+  ]);
+  return res[1].meta.changes === 1;
 }
 
-/** Records one failure and drops this email's attempts that fell out of the window. */
-export function failedAttemptStmts(db: D1Database, email: string): D1PreparedStatement[] {
-  const since = new Date(Date.now() - WINDOW_MS).toISOString();
-  return [
-    db.prepare("DELETE FROM login_attempts WHERE email = ? AND at <= ?").bind(email, since),
-    db.prepare("INSERT INTO login_attempts (email, at) VALUES (?, ?)").bind(email, new Date().toISOString()),
-  ];
-}
+export const clearAttemptsStmt = (db: D1Database, email: string) => db.prepare("DELETE FROM login_attempts WHERE email = ?").bind(email);
 
 /* ---------- MFA_KEY and the encrypted secret ---------- */
 

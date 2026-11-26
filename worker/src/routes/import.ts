@@ -216,7 +216,7 @@ importRoutes.post("/", async (c) => {
   // Every mapped user must exist and not have left.
   const mappedIds = [...new Set(Object.values(ownerMap).filter((v): v is string => !!v))];
   const found = await selectIn<{ id: string; dept: string; status: string }>(
-    db, (ph) => `SELECT id, dept, status FROM users WHERE id IN (${ph})`, mappedIds,
+    db, (ph) => `SELECT id, dept, CASE WHEN approval = 'approved' THEN status ELSE 'left' END AS status FROM users WHERE id IN (${ph})`, mappedIds,
   );
   const users = new Map(found.filter((x) => x.status !== "left").map((x) => [x.id, { dept: x.dept }]));
   if (mappedIds.some((id) => !users.has(id))) return badSource(c, "ownerMap");

@@ -60,27 +60,26 @@ export async function makeUser(
   opts: {
     managerId?: string;
     status?: string;
-    mustChangePassword?: boolean;
     email?: string;
-    password?: string;
+    /** Already linked to this Google account id. */
+    googleSub?: string;
+    approval?: "approved" | "pending" | "declined";
     positionId?: string;
     perms?: import("../../shared/schema").Perms;
     /** Mark two-step sign-in as on (with a placeholder, not a usable secret). Defaults to on for admins, so the
         admin two-step guard does not get in the way of unrelated tests. */
     mfa?: boolean;
   } = {},
-): Promise<{ id: string; email: string; password: string; cookie: string; positionId: string }> {
-  const { hashPassword } = await import("../src/lib/crypto");
+): Promise<{ id: string; email: string; cookie: string; positionId: string }> {
   const { createSession } = await import("../src/lib/session");
   const id = crypto.randomUUID();
   const email = (opts.email ?? `${role}-${id.slice(0, 8)}@example.com`).trim().toLowerCase();
-  const password = opts.password ?? "correct-horse-battery";
-  const { hash, salt } = await hashPassword(password);
   const now = new Date().toISOString();
   const positionId = opts.positionId ?? (opts.perms ? await makePosition(opts.perms) : `pos_${role}`);
   await env.DB.prepare(
-    `INSERT INTO users (id, email, name, role, position_id, dept, manager_id, status, password_hash, password_salt, must_change_password, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, email, name, role, position_id, dept, manager_id, status, approval, google_sub,
+                        password_hash, password_salt, must_change_password, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google-only', '', 0, ?, ?)`,
   )
     .bind(
       id,
@@ -91,9 +90,8 @@ export async function makeUser(
       deptName,
       opts.managerId ?? null,
       opts.status ?? "active",
-      hash,
-      salt,
-      opts.mustChangePassword ? 1 : 0,
+      opts.approval ?? "approved",
+      opts.googleSub ?? null,
       now,
       now,
     )
@@ -102,5 +100,5 @@ export async function makeUser(
     await env.DB.prepare("UPDATE users SET totp_secret_enc = 'test-placeholder', totp_enabled_at = ? WHERE id = ?").bind(now, id).run();
   }
   const token = await createSession(env.DB, id, "test");
-  return { id, email, password, cookie: `lux_session=${token}`, positionId };
+  return { id, email, cookie: `lux_session=${token}`, positionId };
 }

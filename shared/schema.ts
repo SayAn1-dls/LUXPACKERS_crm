@@ -323,7 +323,8 @@ export interface Me {
   role: RoleName;
   dept: string;
   managerId: string | null;
-  mustChangePassword: boolean;
+  /** "pending": signed in with Google, waiting for an admin to let them in. */
+  approval: "approved" | "pending";
   positionId: string | null;
   positionName: string | null;
   isAdmin: boolean;

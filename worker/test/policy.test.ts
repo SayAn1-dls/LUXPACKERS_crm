@@ -12,7 +12,7 @@ import { ADMIN_PERMS, NO_PERMS, STARTER_POSITIONS, parsePerms, roleLabel } from 
 const ROLES: Role[] = ["admin", "manager", "hr", "employee"];
 const starter = (role: Role) => STARTER_POSITIONS.find((p) => p.id === `pos_${role}`)!;
 const mk = (role: Role, dept: string, id = `${role}-${dept}`, managerId: string | null = null): SessionUser => ({
-  id, name: id, email: `${id}@x.test`, role, dept, managerId, mustChangePassword: false,
+  id, name: id, email: `${id}@x.test`, role, dept, managerId, approval: "approved",
   positionId: `pos_${role}`, positionName: starter(role).name, isAdmin: role === "admin", perms: starter(role).perms,
   mfaEnabled: role === "admin", mfaRequired: role === "admin",
 });

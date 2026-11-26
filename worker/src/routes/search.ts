@@ -46,7 +46,7 @@ search.get("/", async (c) => {
   const people = await db
     .prepare(
       `SELECT u.id, u.name, COALESCE(p.name, u.role) AS role, u.dept FROM users u LEFT JOIN positions p ON p.id = u.position_id
-       WHERE u.name LIKE ? ESCAPE '\\' ${canSeePeoplePrivate(u) ? "" : "AND u.status != 'left'"}
+       WHERE u.name LIKE ? ESCAPE '\\' AND u.approval = 'approved' ${canSeePeoplePrivate(u) ? "" : "AND u.status != 'left'"}
        ORDER BY u.name COLLATE NOCASE LIMIT ${MAX}`,
     )
     .bind(like)

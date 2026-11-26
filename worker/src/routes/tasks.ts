@@ -59,7 +59,7 @@ const link = (id: string) => `/tasks?open=${id}`;
 
 interface Assignee { id: string; dept: string; manager_id: string | null; status: string }
 const loadAssignee = (db: D1Database, id: string) =>
-  db.prepare("SELECT id, dept, manager_id, status FROM users WHERE id = ?").bind(id).first<Assignee>();
+  db.prepare("SELECT id, dept, manager_id, CASE WHEN approval = 'approved' THEN status ELSE 'left' END AS status FROM users WHERE id = ?").bind(id).first<Assignee>();
 
 export const tasks = new Hono<AppEnv>();
 tasks.use("*", requireUser);
