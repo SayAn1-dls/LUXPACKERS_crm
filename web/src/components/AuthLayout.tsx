@@ -33,7 +33,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         </svg>
         <div>
           <div className="wordmark">Luxpackers<small>Operations desk</small></div>
-          <p className="poster-type"><span>Lux</span><span>pack</span><span>ers</span></p>
+          <p className="poster-type"><span>Lux</span><span>packers</span></p>
         </div>
         <div className="poster-foot">
           <div className="quote">Not just a trip. An experience.</div>

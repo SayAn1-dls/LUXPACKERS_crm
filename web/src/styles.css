@@ -55,10 +55,9 @@ h3{font:800 17px/1.25 var(--heavy)}
 .wordmark{font:400 28px/1 var(--display);letter-spacing:.01em}
 .wordmark small{display:block;font:500 13px/1.4 var(--sans);margin-top:8px;letter-spacing:.04em;text-transform:uppercase}
 .login-art .wordmark{color:var(--paper)}
-.poster-type{font:400 clamp(48px,8.4vw,124px)/.86 var(--display);color:var(--paper);text-shadow:6px 6px 0 var(--ink);margin:0;letter-spacing:-.02em}
+.poster-type{font:400 clamp(40px,6vw,96px)/.9 var(--display);color:var(--paper);text-shadow:6px 6px 0 var(--ink);margin:0;letter-spacing:-.02em}
 .poster-type span{display:block}
-.poster-type span:nth-child(2){color:var(--sun);margin-left:.35em}
-.poster-type span:nth-child(3){margin-left:.12em}
+.poster-type span:nth-child(2){color:var(--sun);margin-left:.2em;white-space:nowrap}
 .poster-foot{display:flex;flex-direction:column;align-items:flex-start;gap:16px}
 .login-art .quote{max-width:24ch;font:800 clamp(18px,1.8vw,24px)/1.2 var(--heavy);color:var(--ink);background:var(--paper);border:var(--border);box-shadow:var(--shadow);padding:10px 14px;transform:rotate(-2deg);align-self:flex-start}
 .login-art .foot{color:var(--ink);background:var(--sun);border:var(--border-thin);font:400 11px/1 var(--mono-display);text-transform:uppercase;padding:7px 10px;transform:rotate(3deg);align-self:flex-start}
