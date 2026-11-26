@@ -17,11 +17,17 @@ export interface SessionUser {
   isAdmin: boolean;
   /** Effective permissions: ADMIN_PERMS for an admin, NO_PERMS when the position is missing or unreadable. */
   perms: Perms;
+  /** Two-step sign-in is on for this person. */
+  mfaEnabled: boolean;
+  /** Two-step sign-in is compulsory (admins). */
+  mfaRequired: boolean;
 }
 
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /** Worker secret: base64 of 32 random bytes. Encrypts TOTP secrets at rest. Missing = two-step sign-in fails closed. */
+  MFA_KEY?: string;
 }
 
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser | null } };

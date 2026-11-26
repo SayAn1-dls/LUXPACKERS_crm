@@ -65,6 +65,9 @@ export async function makeUser(
     password?: string;
     positionId?: string;
     perms?: import("../../shared/schema").Perms;
+    /** Mark two-step sign-in as on (with a placeholder, not a usable secret). Defaults to on for admins, so the
+        admin two-step guard does not get in the way of unrelated tests. */
+    mfa?: boolean;
   } = {},
 ): Promise<{ id: string; email: string; password: string; cookie: string; positionId: string }> {
   const { hashPassword } = await import("../src/lib/crypto");
@@ -95,6 +98,9 @@ export async function makeUser(
       now,
     )
     .run();
+  if (opts.mfa ?? role === "admin") {
+    await env.DB.prepare("UPDATE users SET totp_secret_enc = 'test-placeholder', totp_enabled_at = ? WHERE id = ?").bind(now, id).run();
+  }
   const token = await createSession(env.DB, id, "test");
   return { id, email, password, cookie: `lux_session=${token}`, positionId };
 }

@@ -88,15 +88,16 @@ interface UserRow {
   position_id: string | null;
   position_name: string | null;
   position_is_admin: number | null;
+  totp_enabled_at: string | null;
 }
 
 const SELECT = `SELECT u.id, u.email, u.name, u.role, u.dept, u.manager_id, u.title, u.phone, u.kind, u.joined_on, u.status,
-    u.created_at, u.updated_at, u.position_id, p.name AS position_name, p.is_admin AS position_is_admin
+    u.created_at, u.updated_at, u.position_id, u.totp_enabled_at, p.name AS position_name, p.is_admin AS position_is_admin
   FROM users u LEFT JOIN positions p ON p.id = u.position_id`;
 
 const loadUser = (db: D1Database, id: string) => db.prepare(`${SELECT} WHERE u.id = ?`).bind(id).first<UserRow>();
 
-/** Never includes password hashes or the must-change flag. */
+/** Never includes password hashes, the must-change flag or anything about the two-step secret beyond on/off. */
 const toApi = (r: UserRow) => ({
   id: r.id,
   email: r.email,
@@ -112,6 +113,7 @@ const toApi = (r: UserRow) => ({
   kind: r.kind,
   joinedOn: r.joined_on,
   status: r.status,
+  mfaEnabled: !!r.totp_enabled_at,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -338,6 +340,27 @@ users.post("/:id/password", async (c) => {
       .bind(hash, salt, mustChange ? 1 : 0, new Date().toISOString(), id),
     db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
     auditStmt(db, actor, "password_set", "user", id, target.name, { mustChange }),
+  ]);
+  return c.json({ ok: true });
+});
+
+/** Admin clears someone else's two-step sign-in (lost phone). Signs them out everywhere; they enrol again. */
+users.post("/:id/mfa/reset", async (c) => {
+  const actor = c.var.user!;
+  if (!canEditUsers(actor)) return c.json({ error: "forbidden" }, 403);
+  const db = c.env.DB;
+  const id = c.req.param("id");
+  if (actor.id === id) return c.json({ error: "forbidden" }, 403);
+  const target = await loadUser(db, id);
+  if (!target) return c.json({ error: "not_found" }, 404);
+  await db.batch([
+    db
+      .prepare("UPDATE users SET totp_secret_enc = NULL, totp_enabled_at = NULL, totp_last_step = NULL, updated_at = ? WHERE id = ?")
+      .bind(new Date().toISOString(), id),
+    db.prepare("DELETE FROM mfa_backup_codes WHERE user_id = ?").bind(id),
+    db.prepare("DELETE FROM mfa_pending WHERE user_id = ?").bind(id),
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
+    auditStmt(db, actor, "mfa_reset", "user", id, target.name, { wasEnabled: !!target.totp_enabled_at }),
   ]);
   return c.json({ ok: true });
 });

@@ -500,10 +500,10 @@ describe("/api/me", () => {
     const emp = await makeUser("employee", "Operations");
     const res = await api(emp.cookie, "GET", "/api/me");
     const text = await res.text();
-    expect(text).not.toMatch(/hash|salt|password_/);
+    expect(text).not.toMatch(/hash|salt|password_|totp|secret/);
     const { user } = JSON.parse(text);
     expect(Object.keys(user).sort()).toEqual(
-      ["dept", "email", "id", "isAdmin", "managerId", "mustChangePassword", "name", "perms", "positionId", "positionName", "role"].sort(),
+      ["dept", "email", "id", "isAdmin", "managerId", "mfaEnabled", "mfaRequired", "mustChangePassword", "name", "perms", "positionId", "positionName", "role"].sort(),
     );
     expect(user).toMatchObject({ isAdmin: false, positionId: "pos_employee", positionName: "Employee", role: "employee" });
     expect(user.perms).toEqual(STARTER_POSITIONS.find((p) => p.id === "pos_employee")!.perms);

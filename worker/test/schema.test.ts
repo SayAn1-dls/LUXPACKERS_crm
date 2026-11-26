@@ -4,7 +4,7 @@ import { api, applyMigrations } from "./helpers";
 
 const TABLES = [
   "users", "sessions", "tasks", "task_comments", "records", "leave_requests",
-  "onboarding", "notifications", "audit_log", "settings", "login_attempts",
+  "onboarding", "notifications", "audit_log", "settings", "login_attempts", "mfa_backup_codes", "mfa_pending",
 ];
 
 describe("scaffold", () => {
@@ -23,7 +23,7 @@ describe("scaffold", () => {
   it("indexes the hot lookups", async () => {
     const { results } = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='index'").all<{ name: string }>();
     const names = results.map((r) => r.name);
-    for (const i of ["idx_task_comments_task", "idx_notifications_user_created", "idx_login_attempts_email"]) {
+    for (const i of ["idx_task_comments_task", "idx_notifications_user_created", "idx_login_attempts_email", "idx_mfa_pending_user", "idx_mfa_backup_codes_user_hash"]) {
       expect(names).toContain(i);
     }
   });

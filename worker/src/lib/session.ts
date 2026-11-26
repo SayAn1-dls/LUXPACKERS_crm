@@ -53,7 +53,7 @@ export async function sessionTokenHash(c: AppContext): Promise<string | null> {
 }
 
 /** Columns needed to build a SessionUser; select FROM users u LEFT JOIN positions p ON p.id = u.position_id. */
-export const SESSION_USER_COLS = `u.id, u.name, u.email, u.dept, u.manager_id, u.must_change_password, u.status,
+export const SESSION_USER_COLS = `u.id, u.name, u.email, u.dept, u.manager_id, u.must_change_password, u.status, u.totp_enabled_at,
   p.id AS position_id, p.name AS position_name, p.is_admin AS position_is_admin, p.perms AS position_perms`;
 
 export interface SessionUserRow {
@@ -64,6 +64,7 @@ export interface SessionUserRow {
   manager_id: string | null;
   must_change_password: number;
   status: string;
+  totp_enabled_at: string | null;
   position_id: string | null;
   position_name: string | null;
   position_is_admin: number | null;
@@ -85,6 +86,8 @@ export function toSessionUser(r: SessionUserRow): SessionUser {
     positionName: r.position_name,
     isAdmin,
     perms,
+    mfaEnabled: !!r.totp_enabled_at,
+    mfaRequired: isAdmin,
   };
 }
 
@@ -150,6 +153,25 @@ export const mustChangeGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
   const u = c.var.user;
   if (u?.mustChangePassword && !OPEN_WHEN_MUST_CHANGE(new URL(c.req.url).pathname)) {
     return c.json({ error: "must_change_password" }, 403);
+  }
+  await next();
+};
+
+/** What an admin who has not turned on two-step sign-in may still reach: who am I, sign out, password, enrolment. */
+const OPEN_WHEN_MFA_SETUP = (p: string) =>
+  p === "/api/me" ||
+  p === "/api/health" ||
+  p === "/api/setup" ||
+  p === "/api/auth/logout" ||
+  p === "/api/auth/password" ||
+  p === "/api/auth/mfa" ||
+  p.startsWith("/api/auth/mfa/");
+
+/** Admins must have two-step sign-in on before they can do anything else. Holds even when MFA_KEY is missing. */
+export const mfaGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const u = c.var.user;
+  if (u?.mfaRequired && !u.mfaEnabled && !OPEN_WHEN_MFA_SETUP(new URL(c.req.url).pathname)) {
+    return c.json({ error: "mfa_setup_required" }, 403);
   }
   await next();
 };

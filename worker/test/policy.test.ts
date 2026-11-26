@@ -14,6 +14,7 @@ const starter = (role: Role) => STARTER_POSITIONS.find((p) => p.id === `pos_${ro
 const mk = (role: Role, dept: string, id = `${role}-${dept}`, managerId: string | null = null): SessionUser => ({
   id, name: id, email: `${id}@x.test`, role, dept, managerId, mustChangePassword: false,
   positionId: `pos_${role}`, positionName: starter(role).name, isAdmin: role === "admin", perms: starter(role).perms,
+  mfaEnabled: role === "admin", mfaRequired: role === "admin",
 });
 const custom = (perms: Partial<Perms>, dept = "Sales & Reservations", id = "c1", managerId: string | null = null): SessionUser => ({
   ...mk("employee", dept, id, managerId), positionId: "pos_custom", positionName: "Custom", isAdmin: false,

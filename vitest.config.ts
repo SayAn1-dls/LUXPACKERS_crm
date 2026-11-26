@@ -8,7 +8,8 @@ export default defineConfig(async () => {
     plugins: [
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+        // MFA_KEY here is a throwaway test-only key (base64 of 32 bytes), never used anywhere real.
+        miniflare: { bindings: { TEST_MIGRATIONS: migrations, MFA_KEY: "dGVzdC1vbmx5LW1mYS1rZXktMzItYnl0ZXMtbG9uZyE=" } },
       }),
     ],
     test: { include: ["worker/test/**/*.test.ts"], setupFiles: [] },

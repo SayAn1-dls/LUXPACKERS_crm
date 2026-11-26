@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./env";
-import { csrf, mustChangeGuard, readSession, requireUser } from "./lib/session";
+import { csrf, mfaGuard, mustChangeGuard, readSession, requireUser } from "./lib/session";
 import { auth } from "./routes/auth";
 import { auditRoutes } from "./routes/audit";
 import { dashboard } from "./routes/dashboard";
@@ -19,8 +19,8 @@ import { users } from "./routes/users";
 
 const app = new Hono<AppEnv>();
 
-// Order matters: CSRF -> session -> must-change-password guard (all before route matching).
-app.use("/api/*", csrf, readSession, mustChangeGuard);
+// Order matters: CSRF -> session -> must-change-password guard -> admin two-step guard (all before route matching).
+app.use("/api/*", csrf, readSession, mustChangeGuard, mfaGuard);
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 app.route("/api/setup", setup);
